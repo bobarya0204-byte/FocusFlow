@@ -61,13 +61,23 @@ function Sidebar({
           </span>
           <span className="nav-label">My Tasks</span>
         </button>
-        <button type="button" className="nav-item" title="Focus" disabled>
+        <button
+          type="button"
+          className={`nav-item${activePage === 'focus' ? ' active' : ''}`}
+          title="Focus"
+          onClick={() => onNavigate('focus')}
+        >
           <span className="nav-icon" aria-hidden="true">
             <Focus size={18} strokeWidth={1.75} />
           </span>
           <span className="nav-label">Focus</span>
         </button>
-        <button type="button" className="nav-item" title="Analytics" disabled>
+        <button
+          type="button"
+          className={`nav-item${activePage === 'analytics' ? ' active' : ''}`}
+          title="Analytics"
+          onClick={() => onNavigate('analytics')}
+        >
           <span className="nav-icon" aria-hidden="true">
             <BarChart3 size={18} strokeWidth={1.75} />
           </span>

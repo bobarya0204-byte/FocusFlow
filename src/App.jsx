@@ -3,11 +3,18 @@ import './App.css'
 import Sidebar from './components/Sidebar'
 import Dashboard from './components/Dashboard'
 import MyTasks from './components/MyTasks'
+import FocusPage from './components/FocusPage'
+import AnalyticsPage from './components/AnalyticsPage'
 import TaskModal from './components/TaskModal'
 import { getInitialTasks, TASKS_STORAGE_KEY } from './utils/tasks'
+import {
+  FOCUS_SESSIONS_KEY,
+  getInitialFocusSessions,
+} from './utils/focus'
 
 function App() {
   const [tasks, setTasks] = useState(getInitialTasks)
+  const [focusSessions, setFocusSessions] = useState(getInitialFocusSessions)
   const [activePage, setActivePage] = useState('dashboard')
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingTaskId, setEditingTaskId] = useState(null)
@@ -20,6 +27,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify(tasks))
   }, [tasks])
+
+  useEffect(() => {
+    localStorage.setItem(FOCUS_SESSIONS_KEY, JSON.stringify(focusSessions))
+  }, [focusSessions])
 
   useEffect(() => {
     if (menuOpenTaskId === null) {
@@ -107,11 +118,26 @@ function App() {
 
   function toggleTaskCompleted(taskId) {
     setTasks(
-      tasks.map((task) =>
-        task.id === taskId
-          ? { ...task, completed: !task.completed }
-          : task,
-      ),
+      tasks.map((task) => {
+        if (task.id !== taskId) {
+          return task
+        }
+
+        const completed = !task.completed
+        if (completed) {
+          return {
+            ...task,
+            completed: true,
+            completedAt: new Date().toISOString(),
+          }
+        }
+
+        const { completedAt, ...rest } = task
+        return {
+          ...rest,
+          completed: false,
+        }
+      }),
     )
   }
 
@@ -138,10 +164,19 @@ function App() {
         onAddTask={openCreateModal}
       />
 
-      {activePage === 'dashboard' ? (
-        <Dashboard {...taskListProps} />
-      ) : (
+      {activePage === 'dashboard' && <Dashboard {...taskListProps} />}
+      {activePage === 'tasks' && (
         <MyTasks {...taskListProps} onAddTask={openCreateModal} />
+      )}
+      {activePage === 'focus' && (
+        <FocusPage
+          tasks={tasks}
+          sessions={focusSessions}
+          onSessionsChange={setFocusSessions}
+        />
+      )}
+      {activePage === 'analytics' && (
+        <AnalyticsPage tasks={tasks} focusSessions={focusSessions} />
       )}
 
       {isModalOpen && (
