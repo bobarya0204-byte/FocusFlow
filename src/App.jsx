@@ -7,7 +7,9 @@ import FocusPage from './components/focus/FocusPage'
 import AnalyticsPage from './components/analytics/AnalyticsPage'
 import PlannerPage from './components/Planner/PlannerPage'
 import DeletedItemsPage from './components/deleted/DeletedItemsPage'
+import AiInboxPage from './components/inbox/AiInboxPage'
 import TaskModal from './components/tasks/TaskModal'
+import TaskDetailPanel from './components/tasks/TaskDetailPanel'
 import ProjectModal from './components/projects/ProjectModal'
 import Toast from './components/ui/Toast'
 import ArchivedProjectDialog from './components/projects/ArchivedProjectDialog'
@@ -21,17 +23,20 @@ function App() {
     setIsSidebarCollapsed,
     deletedCount,
     taskModal,
+    taskDetailTask,
     projectModal,
     archivedGuardProject,
     dismissArchivedGuard,
     restoreArchivedGuardProject,
-    toast,
+    toasts,
     dismissToast,
     undoToast,
     navigateTo,
     openCreateTask,
     closeTaskModal,
+    closeTaskDetail,
     saveTask,
+    deleteTask,
     closeProjectModal,
     saveProject,
   } = useFocusFlow()
@@ -52,6 +57,7 @@ function App() {
       {activePage === 'focus' && <FocusPage />}
       {activePage === 'analytics' && <AnalyticsPage />}
       {activePage === 'planner' && <PlannerPage />}
+      {activePage === 'inbox' && <AiInboxPage />}
       {activePage === 'deleted' && <DeletedItemsPage />}
 
       {taskModal && (
@@ -62,6 +68,16 @@ function App() {
           tasks={tasks}
           onClose={closeTaskModal}
           onSave={saveTask}
+        />
+      )}
+
+      {taskDetailTask && (
+        <TaskDetailPanel
+          task={taskDetailTask}
+          projects={projects}
+          onClose={closeTaskDetail}
+          onSave={saveTask}
+          onDelete={deleteTask}
         />
       )}
 
@@ -82,7 +98,7 @@ function App() {
         />
       )}
 
-      <Toast toast={toast} onUndo={undoToast} onDismiss={dismissToast} />
+      <Toast toasts={toasts} onUndo={undoToast} onDismiss={dismissToast} />
     </div>
   )
 }

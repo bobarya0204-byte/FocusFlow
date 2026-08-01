@@ -140,6 +140,7 @@ export function getAnalyticsStats(tasks, sessions) {
     priorities,
     completedToday,
     focusSessions: focusTotals.completedSessionCount,
+    completedFocusSessions: focusTotals.completedSessionCount,
     interruptedFocusSessions: focusTotals.interruptedSessionCount,
     totalFocusMinutes: focusTotals.totalMinutes,
     averageFocusMinutes: focusTotals.averageMinutes,

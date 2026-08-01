@@ -10,8 +10,25 @@ const STORAGE_ERROR_MESSAGES = {
   unknown: 'A storage error occurred. Changes may not persist.',
 }
 
+/** Errors emitted before React mounts (hydration) are buffered here. */
+const pendingStorageErrors = []
+let hydrationListening = false
+
 export function getStorageErrorMessage(code) {
   return STORAGE_ERROR_MESSAGES[code] || STORAGE_ERROR_MESSAGES.unknown
+}
+
+/**
+ * Drain hydration-time storage errors so the toast system can show them
+ * after the provider mounts. Marks hydration complete so later errors
+ * only go through the live event listener (no double-buffering).
+ */
+export function consumePendingStorageErrors() {
+  hydrationListening = true
+  if (pendingStorageErrors.length === 0) {
+    return []
+  }
+  return pendingStorageErrors.splice(0, pendingStorageErrors.length)
 }
 
 function classifyWriteError(error) {
@@ -40,19 +57,27 @@ function classifyWriteError(error) {
   return 'unknown'
 }
 
-function emitStorageError(code, key, detail) {
+function emitStorageError(code, key, detail = {}) {
+  const payload = {
+    code,
+    key,
+    message:
+      detail.message || getStorageErrorMessage(code),
+    ...detail,
+  }
+
+  // Buffer only until the app starts listening for toast delivery
+  if (!hydrationListening) {
+    pendingStorageErrors.push(payload)
+  }
+
   if (typeof window === 'undefined') {
     return
   }
 
   window.dispatchEvent(
     new CustomEvent(STORAGE_ERROR_EVENT, {
-      detail: {
-        code,
-        key,
-        message: getStorageErrorMessage(code),
-        ...detail,
-      },
+      detail: payload,
     }),
   )
 }
@@ -60,6 +85,7 @@ function emitStorageError(code, key, detail) {
 export function readJson(key, fallback) {
   try {
     if (typeof localStorage === 'undefined') {
+      emitStorageError('unavailable', key)
       return typeof fallback === 'function' ? fallback() : fallback
     }
 
@@ -71,7 +97,9 @@ export function readJson(key, fallback) {
     try {
       return JSON.parse(saved)
     } catch {
-      emitStorageError('parse', key)
+      emitStorageError('parse', key, {
+        message: `Stored "${key}" data was corrupted and was reset safely.`,
+      })
       return typeof fallback === 'function' ? fallback() : fallback
     }
   } catch {

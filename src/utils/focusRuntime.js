@@ -1,4 +1,4 @@
-import { readJson } from './storage'
+import { readJson, writeJson } from './storage'
 
 export const FOCUS_RUNTIME_KEY = 'focusflow-runtime'
 
@@ -134,19 +134,18 @@ function resetTimerToDuration(runtime) {
 
 /**
  * If a running timer has already ended, return a completed session payload and
- * a reset runtime. Otherwise return the same runtime with no session.
+ * a reset runtime. Otherwise return the same runtime reference (no alloc).
  */
 export function resolveFocusRuntime(runtime, now = Date.now()) {
-  const normalized = normalizeFocusRuntime(runtime)
-
   if (
-    !normalized.timerRunning ||
-    normalized.timerEndsAt == null ||
-    normalized.timerEndsAt > now
+    !runtime?.timerRunning ||
+    runtime.timerEndsAt == null ||
+    runtime.timerEndsAt > now
   ) {
-    return { runtime: normalized, completedSession: null }
+    return { runtime, completedSession: null }
   }
 
+  const normalized = normalizeFocusRuntime(runtime)
   const endedAt = normalized.timerEndsAt
   const completedSession = {
     id: `timer-${endedAt}`,
@@ -164,6 +163,11 @@ export function resolveFocusRuntime(runtime, now = Date.now()) {
     runtime: resetTimerToDuration(normalized),
     completedSession,
   }
+}
+
+/** Persist helper for event-driven runtime writes. */
+export function persistFocusRuntime(runtime) {
+  return writeJson(FOCUS_RUNTIME_KEY, runtime)
 }
 
 export function withLinkedTask(session, linkedTask) {

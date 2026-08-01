@@ -36,7 +36,13 @@ function PlannerTaskCard({
         />
       </label>
       <div className="planner-task-content">
-        <p className="planner-task-title">{task.title}</p>
+        <button
+          type="button"
+          className="task-title-btn planner-task-title-btn"
+          onClick={() => onEdit(task)}
+        >
+          <span className="planner-task-title">{task.title}</span>
+        </button>
         <div className="planner-task-meta">
           <span
             className={`priority priority-${task.priority.toLowerCase()} planner-priority`}

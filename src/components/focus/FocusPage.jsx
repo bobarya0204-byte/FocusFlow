@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Play,
   Pause,
@@ -19,6 +19,10 @@ import {
   getSessionDurationSeconds,
   getTodayFocusStats,
 } from '../../utils/focus'
+import {
+  getStopwatchElapsedSeconds,
+  getTimerRemainingSeconds,
+} from '../../utils/focusRuntime'
 import { getTodayLocalDate } from '../../utils/dates'
 
 const PRESET_DURATIONS = [25, 45, 60]
@@ -29,13 +33,34 @@ function FocusPage() {
     focusSessions: sessions,
     focusRuntime,
     focusActions,
-    secondsLeft,
-    stopwatchSeconds,
     isTimerRunning,
     isStopwatchRunning,
     isAnyModeRunning,
     isCurrentModeRunning,
   } = useFocusFlow()
+
+  // Display clock stays local so active sessions do not re-render the app tree
+  const [displayClock, setDisplayClock] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (!isAnyModeRunning) {
+      setDisplayClock(Date.now())
+      return undefined
+    }
+
+    setDisplayClock(Date.now())
+    const intervalId = window.setInterval(() => {
+      setDisplayClock(Date.now())
+    }, 250)
+
+    return () => window.clearInterval(intervalId)
+  }, [isAnyModeRunning, focusRuntime.timerEndsAt, focusRuntime.stopwatchStartedAt])
+
+  const secondsLeft = getTimerRemainingSeconds(focusRuntime, displayClock)
+  const stopwatchSeconds = getStopwatchElapsedSeconds(
+    focusRuntime,
+    displayClock,
+  )
 
   const { focusMode, durationMode, customMinutes, selectedTaskId } =
     focusRuntime

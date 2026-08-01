@@ -49,10 +49,20 @@ import {
   compareTaskIds,
   createTaskId,
   getInitialTasks,
+  normalizeEstimatedMinutes,
   normalizePriority,
+  normalizeTaskStatus,
   reconcileTaskProjects,
 } from '../utils/tasks'
-import { STORAGE_ERROR_EVENT } from '../utils/storage'
+import {
+  buildNextRecurringInstance,
+  ensureOpenRecurringInstances,
+  normalizeRecurrence,
+} from '../utils/recurrence'
+import {
+  STORAGE_ERROR_EVENT,
+  consumePendingStorageErrors,
+} from '../utils/storage'
 import { TOAST_TYPES, createToast } from '../utils/toasts'
 
 const FocusFlowContext = createContext(null)
@@ -98,51 +108,111 @@ export function FocusFlowProvider({ children }) {
   )
   const [projectMenuOpenId, setProjectMenuOpenId] = useState(null)
   const [taskModal, setTaskModal] = useState(null)
+  const [taskDetailId, setTaskDetailId] = useState(null)
   const [projectModal, setProjectModal] = useState(null)
   const [archivedGuardProject, setArchivedGuardProject] = useState(null)
-  const [toast, setToast] = useState(null)
-  const toastTimerRef = useRef(null)
+  const [toasts, setToasts] = useState([])
+  const toastTimersRef = useRef(new Map())
+  const collectionsRef = useRef({ tasks, projects })
+  collectionsRef.current = { tasks, projects }
   const deletedCount = deletedTasks.length + deletedProjects.length
 
-  // Silent purge of items past the 30-day retention window
+  const taskDetailTask = useMemo(() => {
+    if (taskDetailId == null) {
+      return null
+    }
+    return (
+      liveTasks.find((task) => compareTaskIds(task.id, taskDetailId)) || null
+    )
+  }, [liveTasks, taskDetailId])
+
+  useEffect(() => {
+    if (taskDetailId != null && !taskDetailTask) {
+      setTaskDetailId(null)
+    }
+  }, [taskDetailId, taskDetailTask])
+
+  const updateCollections = useCallback(
+    (mutator) => {
+      const { tasks: currentTasks, projects: currentProjects } =
+        collectionsRef.current
+      const next = mutator(currentTasks, currentProjects)
+      collectionsRef.current = {
+        tasks: next.tasks,
+        projects: next.projects,
+      }
+      setTasks(next.tasks)
+      setProjects(next.projects)
+      return next
+    },
+    [setProjects, setTasks],
+  )
+
+  // Silent purge + ensure recurring series have an open next instance
   useEffect(() => {
     const purged = purgeExpiredDeleted(tasks, projects)
-    if (!purged.didChange) {
+    let nextTasks = purged.didChange ? purged.tasks : tasks
+    let nextProjects = purged.didChange ? purged.projects : projects
+    const withRecurring = ensureOpenRecurringInstances(nextTasks)
+    const didRecurringChange = withRecurring !== nextTasks
+    nextTasks = withRecurring
+
+    if (!purged.didChange && !didRecurringChange) {
       return
     }
-    setTasks(purged.tasks)
-    setProjects(purged.projects)
+    collectionsRef.current = { tasks: nextTasks, projects: nextProjects }
+    setTasks(nextTasks)
+    if (purged.didChange) {
+      setProjects(nextProjects)
+    }
     // Run once on startup with the hydrated localStorage snapshot
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
-    setTasks((current) => reconcileTaskProjects(current, projects))
+    setTasks((current) => {
+      const next = reconcileTaskProjects(current, projects)
+      if (next !== current) {
+        collectionsRef.current = {
+          tasks: next,
+          projects: collectionsRef.current.projects,
+        }
+      }
+      return next
+    })
   }, [projects, setTasks])
 
-  const clearToastTimer = useCallback(() => {
-    if (toastTimerRef.current != null) {
-      window.clearTimeout(toastTimerRef.current)
-      toastTimerRef.current = null
+  const dismissToast = useCallback((toastId) => {
+    const timers = toastTimersRef.current
+    if (toastId == null) {
+      timers.forEach((timerId) => window.clearTimeout(timerId))
+      timers.clear()
+      setToasts([])
+      return
     }
-  }, [])
 
-  const dismissToast = useCallback(() => {
-    clearToastTimer()
-    setToast(null)
-  }, [clearToastTimer])
+    const timerId = timers.get(toastId)
+    if (timerId != null) {
+      window.clearTimeout(timerId)
+      timers.delete(toastId)
+    }
+    setToasts((current) => current.filter((toast) => toast.id !== toastId))
+  }, [])
 
   const showToast = useCallback(
     (options) => {
-      clearToastTimer()
       const next = createToast(options)
-      setToast(next)
-      toastTimerRef.current = window.setTimeout(() => {
-        setToast(null)
-        toastTimerRef.current = null
+      setToasts((current) => [...current, next])
+
+      const timerId = window.setTimeout(() => {
+        toastTimersRef.current.delete(next.id)
+        setToasts((current) => current.filter((toast) => toast.id !== next.id))
       }, next.durationMs)
+      toastTimersRef.current.set(next.id, timerId)
+
+      return next.id
     },
-    [clearToastTimer],
+    [],
   )
 
   const showDeleteToast = useCallback(
@@ -156,37 +226,57 @@ export function FocusFlowProvider({ children }) {
     [showToast],
   )
 
-  const undoToast = useCallback(() => {
-    setToast((current) => {
-      if (current?.onUndo) {
-        current.onUndo()
+  const undoToast = useCallback(
+    (toastId) => {
+      setToasts((current) => {
+        const target = current.find((toast) => toast.id === toastId)
+        if (target?.onUndo) {
+          target.onUndo()
+        }
+        return current.filter((toast) => toast.id !== toastId)
+      })
+
+      const timerId = toastTimersRef.current.get(toastId)
+      if (timerId != null) {
+        window.clearTimeout(timerId)
+        toastTimersRef.current.delete(toastId)
       }
-      return null
-    })
-    clearToastTimer()
-  }, [clearToastTimer])
+    },
+    [],
+  )
 
-  useEffect(() => () => clearToastTimer(), [clearToastTimer])
+  useEffect(
+    () => () => {
+      toastTimersRef.current.forEach((timerId) => window.clearTimeout(timerId))
+      toastTimersRef.current.clear()
+    },
+    [],
+  )
 
-  // Surface localStorage failures as error toasts without crashing
+  // Surface localStorage failures (including buffered hydration errors)
   useEffect(() => {
-    let lastShownAt = 0
+    const seenKeys = new Set()
 
-    function handleStorageError(event) {
-      const now = Date.now()
-      if (now - lastShownAt < 2500) {
+    function enqueueStorageError(detail) {
+      const key = detail?.key || detail?.code || 'unknown'
+      if (seenKeys.has(key)) {
         return
       }
-      lastShownAt = now
+      seenKeys.add(key)
 
-      const message =
-        event?.detail?.message ||
-        'A storage error occurred. Changes may not persist.'
       showToast({
-        message,
+        message:
+          detail?.message ||
+          'A storage error occurred. Changes may not persist.',
         type: TOAST_TYPES.ERROR,
         durationMs: 8000,
       })
+    }
+
+    consumePendingStorageErrors().forEach(enqueueStorageError)
+
+    function handleStorageError(event) {
+      enqueueStorageError(event?.detail)
     }
 
     window.addEventListener(STORAGE_ERROR_EVENT, handleStorageError)
@@ -260,6 +350,7 @@ export function FocusFlowProvider({ children }) {
     const planned =
       typeof plannedDate === 'string' && plannedDate ? plannedDate : ''
     setProjectMenuOpenId(null)
+    setTaskDetailId(null)
     setTaskModal({
       mode: 'create',
       defaults: {
@@ -287,8 +378,9 @@ export function FocusFlowProvider({ children }) {
     if (!projectId) {
       return
     }
-    setProjects((current) =>
-      current.map((project) =>
+    updateCollections((currentTasks, currentProjects) => ({
+      tasks: currentTasks,
+      projects: currentProjects.map((project) =>
         project.id === projectId && isLive(project)
           ? {
               ...project,
@@ -297,10 +389,10 @@ export function FocusFlowProvider({ children }) {
             }
           : project,
       ),
-    )
+    }))
     showToast({ message: 'Project Restored', type: TOAST_TYPES.SUCCESS })
     setArchivedGuardProject(null)
-  }, [archivedGuardProject, setProjects, showToast])
+  }, [archivedGuardProject, showToast, updateCollections])
 
   const openCreateTaskForProject = useCallback(
     (projectId) => {
@@ -334,7 +426,8 @@ export function FocusFlowProvider({ children }) {
       }
 
       setProjectMenuOpenId(null)
-      setTaskModal({ mode: 'edit', task })
+      setTaskModal(null)
+      setTaskDetailId(task.id)
     },
     [liveProjects, showArchivedGuard],
   )
@@ -343,8 +436,24 @@ export function FocusFlowProvider({ children }) {
     setTaskModal(null)
   }, [])
 
+  const closeTaskDetail = useCallback(() => {
+    setTaskDetailId(null)
+  }, [])
+
   const saveTask = useCallback(
-    ({ id, title, priority, dueDate, plannedDate, projectId }) => {
+    ({
+      id,
+      title,
+      priority,
+      dueDate,
+      plannedDate,
+      projectId,
+      description = '',
+      notes = '',
+      status,
+      estimatedMinutes = null,
+      recurrence = undefined,
+    }) => {
       const now = new Date().toISOString()
       const nextProjectId = resolveProjectId(
         projectId || UNCATEGORIZED_PROJECT_ID,
@@ -360,54 +469,163 @@ export function FocusFlowProvider({ children }) {
       const nextPriority = normalizePriority(priority)
       const nextDueDate = dueDate || null
       const nextPlannedDate = plannedDate || null
+      const nextEstimated = normalizeEstimatedMinutes(estimatedMinutes)
 
       if (id != null) {
-        setTasks((current) =>
-          current.map((task) =>
-            compareTaskIds(task.id, id)
-              ? {
-                  ...task,
-                  title,
-                  priority: nextPriority,
-                  dueDate: nextDueDate,
-                  plannedDate: nextPlannedDate,
-                  projectId: nextProjectId,
-                  updatedAt: now,
-                }
-              : task,
-          ),
-        )
+        updateCollections((currentTasks, currentProjects) => {
+          let spawned = null
+          const tasks = currentTasks.map((task) => {
+            if (!compareTaskIds(task.id, id)) {
+              return task
+            }
+
+            const nextStatus = normalizeTaskStatus(
+              status ?? task.status,
+              status === 'Completed' ||
+                (status == null && task.completed),
+            )
+            const completed = nextStatus === 'Completed'
+            const wasCompleted = task.completed
+            const nextRecurrence =
+              recurrence === undefined
+                ? task.recurrence
+                : normalizeRecurrence(recurrence)
+
+            const updated = {
+              ...task,
+              title,
+              description:
+                typeof description === 'string'
+                  ? description
+                  : task.description || '',
+              notes: typeof notes === 'string' ? notes : task.notes || '',
+              priority: nextPriority,
+              status: nextStatus,
+              completed,
+              completedAt: completed
+                ? task.completedAt || now
+                : null,
+              dueDate: nextDueDate,
+              plannedDate: nextPlannedDate,
+              estimatedMinutes: nextEstimated,
+              projectId: nextProjectId,
+              updatedAt: now,
+              recurrence: nextRecurrence,
+              seriesId:
+                nextRecurrence && !task.seriesId ? task.id : task.seriesId,
+            }
+
+            if (completed && !wasCompleted && nextRecurrence) {
+              spawned = buildNextRecurringInstance(updated, now)
+            }
+
+            return updated
+          })
+
+          return {
+            tasks: spawned ? [...tasks, spawned] : tasks,
+            projects: currentProjects,
+          }
+        })
         showToast({ message: 'Task Updated', type: TOAST_TYPES.SUCCESS })
+        setTaskDetailId(null)
       } else {
-        setTasks((current) => [
-          ...current,
-          {
-            id: createTaskId(),
-            title,
-            priority: nextPriority,
-            completed: false,
-            dueDate: nextDueDate,
-            plannedDate: nextPlannedDate,
-            createdAt: now,
-            updatedAt: now,
-            projectId: nextProjectId,
-            deleted: false,
-            deletedAt: null,
-          },
-        ])
+        const nextStatus = normalizeTaskStatus(status, status === 'Completed')
+        const nextRecurrence = normalizeRecurrence(recurrence)
+        updateCollections((currentTasks, currentProjects) => ({
+          tasks: [
+            ...currentTasks,
+            {
+              id: createTaskId(),
+              title,
+              description: typeof description === 'string' ? description : '',
+              notes: typeof notes === 'string' ? notes : '',
+              priority: nextPriority,
+              status: nextStatus,
+              completed: nextStatus === 'Completed',
+              completedAt: nextStatus === 'Completed' ? now : null,
+              dueDate: nextDueDate,
+              plannedDate: nextPlannedDate,
+              estimatedMinutes: nextEstimated,
+              createdAt: now,
+              updatedAt: now,
+              projectId: nextProjectId,
+              deleted: false,
+              deletedAt: null,
+              recurrence: nextRecurrence,
+              seriesId: null,
+              occurrenceDate: nextPlannedDate || nextDueDate || null,
+            },
+          ],
+          projects: currentProjects,
+        }))
         showToast({ message: 'Task Created', type: TOAST_TYPES.SUCCESS })
       }
 
       setTaskModal(null)
     },
-    [liveProjects, resolveProjectId, setTasks, showArchivedGuard, showToast],
+    [
+      liveProjects,
+      resolveProjectId,
+      showArchivedGuard,
+      showToast,
+      updateCollections,
+    ],
+  )
+
+  const createTasksFromSuggestions = useCallback(
+    (suggestions) => {
+      if (!Array.isArray(suggestions) || suggestions.length === 0) {
+        return
+      }
+      const now = new Date().toISOString()
+      updateCollections((currentTasks, currentProjects) => ({
+        tasks: [
+          ...currentTasks,
+          ...suggestions.map((suggestion) => ({
+            id: createTaskId(),
+            title: String(suggestion.title || '').trim() || 'Untitled task',
+            description: '',
+            notes: suggestion.sourceText
+              ? `From AI Inbox: ${suggestion.sourceText}`
+              : '',
+            priority: normalizePriority(suggestion.priority),
+            status: 'Open',
+            completed: false,
+            completedAt: null,
+            dueDate: suggestion.dueDate || null,
+            plannedDate: suggestion.dueDate || null,
+            estimatedMinutes: null,
+            createdAt: now,
+            updatedAt: now,
+            projectId: resolveProjectId(
+              suggestion.projectId || UNCATEGORIZED_PROJECT_ID,
+            ),
+            deleted: false,
+            deletedAt: null,
+            recurrence: null,
+            seriesId: null,
+            occurrenceDate: null,
+          })),
+        ],
+        projects: currentProjects,
+      }))
+      showToast({
+        message:
+          suggestions.length === 1
+            ? 'Task Created'
+            : `${suggestions.length} tasks created`,
+        type: TOAST_TYPES.SUCCESS,
+      })
+    },
+    [resolveProjectId, showToast, updateCollections],
   )
 
   const restoreTask = useCallback(
     (taskId, { notify = true } = {}) => {
-      const restored = restoreTaskInCollections(tasks, projects, taskId)
-      setTasks(restored.tasks)
-      setProjects(restored.projects)
+      updateCollections((currentTasks, currentProjects) =>
+        restoreTaskInCollections(currentTasks, currentProjects, taskId),
+      )
       if (notify) {
         showToast({
           message: 'Restored from Deleted Items',
@@ -415,14 +633,14 @@ export function FocusFlowProvider({ children }) {
         })
       }
     },
-    [tasks, projects, setProjects, setTasks, showToast],
+    [updateCollections, showToast],
   )
 
   const restoreProject = useCallback(
     (projectId, { notify = true } = {}) => {
-      const restored = restoreProjectInCollections(tasks, projects, projectId)
-      setTasks(restored.tasks)
-      setProjects(restored.projects)
+      updateCollections((currentTasks, currentProjects) =>
+        restoreProjectInCollections(currentTasks, currentProjects, projectId),
+      )
       if (notify) {
         showToast({
           message: 'Restored from Deleted Items',
@@ -430,20 +648,28 @@ export function FocusFlowProvider({ children }) {
         })
       }
     },
-    [tasks, projects, setProjects, setTasks, showToast],
+    [updateCollections, showToast],
   )
 
   const deleteTask = useCallback(
     (taskId) => {
-      setTasks((current) => softDeleteTask(current, taskId))
+      updateCollections((currentTasks, currentProjects) => ({
+        tasks: softDeleteTask(currentTasks, taskId),
+        projects: currentProjects,
+      }))
+      setTaskDetailId((current) =>
+        current != null && compareTaskIds(current, taskId) ? null : current,
+      )
       showDeleteToast(() => restoreTask(taskId, { notify: false }))
     },
-    [restoreTask, setTasks, showDeleteToast],
+    [restoreTask, showDeleteToast, updateCollections],
   )
 
   const permanentlyDeleteTask = useCallback(
     (taskId, { confirm = true } = {}) => {
-      const task = tasks.find((item) => compareTaskIds(item.id, taskId))
+      const task = collectionsRef.current.tasks.find((item) =>
+        compareTaskIds(item.id, taskId),
+      )
       const label = task?.title ? `"${task.title}"` : 'this task'
       if (
         confirm &&
@@ -453,20 +679,24 @@ export function FocusFlowProvider({ children }) {
       ) {
         return false
       }
-      setTasks((current) => permanentlyRemoveTask(current, taskId))
+      updateCollections((currentTasks, currentProjects) => ({
+        tasks: permanentlyRemoveTask(currentTasks, taskId),
+        projects: currentProjects,
+      }))
       showToast({
         message: 'Permanently deleted',
         type: TOAST_TYPES.WARNING,
       })
       return true
     },
-    [tasks, setTasks, showToast],
+    [updateCollections, showToast],
   )
 
   const toggleTaskCompleted = useCallback(
     (taskId) => {
-      setTasks((current) =>
-        current.map((task) => {
+      updateCollections((currentTasks, currentProjects) => {
+        let spawned = null
+        const tasks = currentTasks.map((task) => {
           if (!compareTaskIds(task.id, taskId) || isDeleted(task)) {
             return task
           }
@@ -474,30 +704,41 @@ export function FocusFlowProvider({ children }) {
           const completed = !task.completed
           const updatedAt = new Date().toISOString()
           if (completed) {
-            return {
+            const updated = {
               ...task,
               completed: true,
+              status: 'Completed',
               completedAt: updatedAt,
               updatedAt,
             }
+            if (task.recurrence) {
+              spawned = buildNextRecurringInstance(updated, updatedAt)
+            }
+            return updated
           }
 
           const { completedAt, ...rest } = task
           return {
             ...rest,
             completed: false,
+            status: rest.status === 'Completed' ? 'Open' : rest.status || 'Open',
             updatedAt,
           }
-        }),
-      )
+        })
+
+        return {
+          tasks: spawned ? [...tasks, spawned] : tasks,
+          projects: currentProjects,
+        }
+      })
     },
-    [setTasks],
+    [updateCollections],
   )
 
   const planTask = useCallback(
     (taskId, plannedDate) => {
-      setTasks((current) =>
-        current.map((task) =>
+      updateCollections((currentTasks, currentProjects) => ({
+        tasks: currentTasks.map((task) =>
           compareTaskIds(task.id, taskId) && isLive(task)
             ? {
                 ...task,
@@ -506,9 +747,10 @@ export function FocusFlowProvider({ children }) {
               }
             : task,
         ),
-      )
+        projects: currentProjects,
+      }))
     },
-    [setTasks],
+    [updateCollections],
   )
 
   const openCreateProject = useCallback(() => {
@@ -544,8 +786,9 @@ export function FocusFlowProvider({ children }) {
       const now = new Date().toISOString()
 
       if (id != null) {
-        setProjects((current) =>
-          current.map((project) =>
+        updateCollections((currentTasks, currentProjects) => ({
+          tasks: currentTasks,
+          projects: currentProjects.map((project) =>
             project.id === id
               ? {
                   ...project,
@@ -557,31 +800,34 @@ export function FocusFlowProvider({ children }) {
                 }
               : project,
           ),
-        )
+        }))
         showToast({ message: 'Project Updated', type: TOAST_TYPES.SUCCESS })
       } else {
-        setProjects((current) => [
-          ...current,
-          {
-            id: `project-${Date.now()}`,
-            name,
-            description,
-            color,
-            icon,
-            workspaceId: 'default',
-            archived: false,
-            deleted: false,
-            deletedAt: null,
-            createdAt: now,
-            updatedAt: now,
-          },
-        ])
+        updateCollections((currentTasks, currentProjects) => ({
+          tasks: currentTasks,
+          projects: [
+            ...currentProjects,
+            {
+              id: `project-${Date.now()}`,
+              name,
+              description,
+              color,
+              icon,
+              workspaceId: 'default',
+              archived: false,
+              deleted: false,
+              deletedAt: null,
+              createdAt: now,
+              updatedAt: now,
+            },
+          ],
+        }))
         showToast({ message: 'Project Created', type: TOAST_TYPES.SUCCESS })
       }
 
       setProjectModal(null)
     },
-    [setProjects, showToast],
+    [showToast, updateCollections],
   )
 
   const archiveProject = useCallback(
@@ -597,8 +843,9 @@ export function FocusFlowProvider({ children }) {
 
       const willArchive = !target.archived
 
-      setProjects((current) =>
-        current.map((project) =>
+      updateCollections((currentTasks, currentProjects) => ({
+        tasks: currentTasks,
+        projects: currentProjects.map((project) =>
           project.id === projectId && isLive(project)
             ? {
                 ...project,
@@ -607,14 +854,14 @@ export function FocusFlowProvider({ children }) {
               }
             : project,
         ),
-      )
+      }))
       setProjectMenuOpenId(null)
       showToast({
         message: willArchive ? 'Project Archived' : 'Project Restored',
         type: TOAST_TYPES.SUCCESS,
       })
     },
-    [liveProjects, setProjects, showToast],
+    [liveProjects, showToast, updateCollections],
   )
 
   const deleteProject = useCallback(
@@ -623,9 +870,9 @@ export function FocusFlowProvider({ children }) {
         return
       }
 
-      const next = softDeleteProject(tasks, projects, projectId)
-      setTasks(next.tasks)
-      setProjects(next.projects)
+      updateCollections((currentTasks, currentProjects) =>
+        softDeleteProject(currentTasks, currentProjects, projectId),
+      )
       setProjectMenuOpenId(null)
       if (projectFilter === projectId) {
         setProjectFilter('all')
@@ -634,14 +881,11 @@ export function FocusFlowProvider({ children }) {
       showDeleteToast(() => restoreProject(projectId, { notify: false }))
     },
     [
-      tasks,
-      projects,
       projectFilter,
       restoreProject,
       setProjectFilter,
-      setProjects,
-      setTasks,
       showDeleteToast,
+      updateCollections,
     ],
   )
 
@@ -651,7 +895,9 @@ export function FocusFlowProvider({ children }) {
         return false
       }
 
-      const project = projects.find((item) => item.id === projectId)
+      const project = collectionsRef.current.projects.find(
+        (item) => item.id === projectId,
+      )
       const label = project?.name ? `"${project.name}"` : 'this project'
       if (
         confirm &&
@@ -662,9 +908,9 @@ export function FocusFlowProvider({ children }) {
         return false
       }
 
-      const next = permanentlyRemoveProject(tasks, projects, projectId)
-      setTasks(next.tasks)
-      setProjects(next.projects)
+      updateCollections((currentTasks, currentProjects) =>
+        permanentlyRemoveProject(currentTasks, currentProjects, projectId),
+      )
       if (projectFilter === projectId) {
         setProjectFilter('all')
       }
@@ -674,46 +920,40 @@ export function FocusFlowProvider({ children }) {
       })
       return true
     },
-    [
-      projects,
-      tasks,
-      projectFilter,
-      setProjectFilter,
-      setProjects,
-      setTasks,
-      showToast,
-    ],
+    [projectFilter, setProjectFilter, showToast, updateCollections],
   )
 
   const restoreSelectedDeleted = useCallback(
     (selectionKeys) => {
-      let nextTasks = tasks
-      let nextProjects = projects
+      updateCollections((currentTasks, currentProjects) => {
+        let nextTasks = currentTasks
+        let nextProjects = currentProjects
 
-      selectionKeys.forEach((key) => {
-        if (key.startsWith('project:')) {
-          const projectId = key.slice('project:'.length)
-          const restored = restoreProjectInCollections(
-            nextTasks,
-            nextProjects,
-            projectId,
-          )
-          nextTasks = restored.tasks
-          nextProjects = restored.projects
-        } else if (key.startsWith('task:')) {
-          const taskId = key.slice('task:'.length)
-          const restored = restoreTaskInCollections(
-            nextTasks,
-            nextProjects,
-            taskId,
-          )
-          nextTasks = restored.tasks
-          nextProjects = restored.projects
-        }
+        selectionKeys.forEach((key) => {
+          if (key.startsWith('project:')) {
+            const projectId = key.slice('project:'.length)
+            const restored = restoreProjectInCollections(
+              nextTasks,
+              nextProjects,
+              projectId,
+            )
+            nextTasks = restored.tasks
+            nextProjects = restored.projects
+          } else if (key.startsWith('task:')) {
+            const taskId = key.slice('task:'.length)
+            const restored = restoreTaskInCollections(
+              nextTasks,
+              nextProjects,
+              taskId,
+            )
+            nextTasks = restored.tasks
+            nextProjects = restored.projects
+          }
+        })
+
+        return { tasks: nextTasks, projects: nextProjects }
       })
 
-      setTasks(nextTasks)
-      setProjects(nextProjects)
       if (selectionKeys.length > 0) {
         showToast({
           message: 'Restored from Deleted Items',
@@ -721,7 +961,7 @@ export function FocusFlowProvider({ children }) {
         })
       }
     },
-    [tasks, projects, setProjects, setTasks, showToast],
+    [updateCollections, showToast],
   )
 
   const permanentlyDeleteSelected = useCallback(
@@ -741,38 +981,39 @@ export function FocusFlowProvider({ children }) {
         return
       }
 
-      let nextTasks = tasks
-      let nextProjects = projects
+      updateCollections((currentTasks, currentProjects) => {
+        let nextTasks = currentTasks
+        let nextProjects = currentProjects
 
-      // Remove projects first so nested tasks are cleared with them
-      selectionKeys
-        .filter((key) => key.startsWith('project:'))
-        .forEach((key) => {
-          const projectId = key.slice('project:'.length)
-          const removed = permanentlyRemoveProject(
-            nextTasks,
-            nextProjects,
-            projectId,
-          )
-          nextTasks = removed.tasks
-          nextProjects = removed.projects
-        })
+        selectionKeys
+          .filter((key) => key.startsWith('project:'))
+          .forEach((key) => {
+            const projectId = key.slice('project:'.length)
+            const removed = permanentlyRemoveProject(
+              nextTasks,
+              nextProjects,
+              projectId,
+            )
+            nextTasks = removed.tasks
+            nextProjects = removed.projects
+          })
 
-      selectionKeys
-        .filter((key) => key.startsWith('task:'))
-        .forEach((key) => {
-          const taskId = key.slice('task:'.length)
-          nextTasks = permanentlyRemoveTask(nextTasks, taskId)
-        })
+        selectionKeys
+          .filter((key) => key.startsWith('task:'))
+          .forEach((key) => {
+            const taskId = key.slice('task:'.length)
+            nextTasks = permanentlyRemoveTask(nextTasks, taskId)
+          })
 
-      setTasks(nextTasks)
-      setProjects(nextProjects)
+        return { tasks: nextTasks, projects: nextProjects }
+      })
+
       showToast({
         message: 'Permanently deleted',
         type: TOAST_TYPES.WARNING,
       })
     },
-    [tasks, projects, setProjects, setTasks, showToast],
+    [updateCollections, showToast],
   )
 
   const toggleProjectMenu = useCallback((projectId) => {
@@ -799,12 +1040,15 @@ export function FocusFlowProvider({ children }) {
       isSidebarCollapsed,
       setIsSidebarCollapsed,
       taskModal,
+      taskDetailId,
+      taskDetailTask,
       projectModal,
       archivedGuardProject,
       showArchivedGuard,
       dismissArchivedGuard,
       restoreArchivedGuardProject,
-      toast,
+      toasts,
+      toast: toasts[toasts.length - 1] || null,
       showToast,
       dismissToast,
       undoToast,
@@ -814,7 +1058,9 @@ export function FocusFlowProvider({ children }) {
       openCreateTaskForProject,
       openEditTask,
       closeTaskModal,
+      closeTaskDetail,
       saveTask,
+      createTasksFromSuggestions,
       deleteTask,
       restoreTask,
       permanentlyDeleteTask,
@@ -846,12 +1092,14 @@ export function FocusFlowProvider({ children }) {
       projectMenuOpenId,
       isSidebarCollapsed,
       taskModal,
+      taskDetailId,
+      taskDetailTask,
       projectModal,
       archivedGuardProject,
       showArchivedGuard,
       dismissArchivedGuard,
       restoreArchivedGuardProject,
-      toast,
+      toasts,
       showToast,
       dismissToast,
       undoToast,
@@ -861,7 +1109,9 @@ export function FocusFlowProvider({ children }) {
       openCreateTaskForProject,
       openEditTask,
       closeTaskModal,
+      closeTaskDetail,
       saveTask,
+      createTasksFromSuggestions,
       deleteTask,
       restoreTask,
       permanentlyDeleteTask,

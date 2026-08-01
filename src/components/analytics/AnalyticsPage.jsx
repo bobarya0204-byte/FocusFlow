@@ -8,6 +8,7 @@ import {
   getAnalyticsStats,
   getPriorityBarWidth,
 } from '../../utils/analytics'
+import { buildProductivityInsights } from '../../utils/insights'
 import { getProjectAnalytics } from '../../utils/projects'
 
 function AnalyticsPage() {
@@ -20,6 +21,10 @@ function AnalyticsPage() {
   const projectStats = useMemo(
     () => getProjectAnalytics(projects, tasks),
     [projects, tasks],
+  )
+  const insights = useMemo(
+    () => buildProductivityInsights(tasks, focusSessions, projects),
+    [tasks, focusSessions, projects],
   )
   const priorityTotal =
     stats.priorities.high + stats.priorities.medium + stats.priorities.low
@@ -52,28 +57,28 @@ function AnalyticsPage() {
             label="Tasks Completed Today"
             value={stats.completedToday}
           />
-          <StatCard
-            label="Sessions Completed"
-            value={stats.focusSessions}
-          />
-          <StatCard
-            label="Total Focus Time"
-            value={formatFocusDuration(stats.totalFocusMinutes)}
-          />
-        </section>
-
-        <section className="summary-grid">
           <StatCard label="Active Projects" value={projectStats.activeCount} />
           <StatCard
             label="Archived Projects"
             value={projectStats.archivedCount}
           />
+        </section>
+
+        <section className="summary-grid">
           <StatCard
-            label="Avg Project Progress"
-            value={`${projectStats.completionPercent}%`}
+            label="Completed Sessions"
+            value={stats.completedFocusSessions}
           />
           <StatCard
-            label="Avg Focus Session"
+            label="Interrupted Sessions"
+            value={stats.interruptedFocusSessions}
+          />
+          <StatCard
+            label="Total Focus Time"
+            value={formatFocusDuration(stats.totalFocusMinutes)}
+          />
+          <StatCard
+            label="Average Focus Session"
             value={formatFocusDuration(stats.averageFocusMinutes)}
           />
         </section>
@@ -170,6 +175,49 @@ function AnalyticsPage() {
           </div>
         </section>
       </div>
+
+      <section className="analytics-panel insights-panel">
+        <div className="section-heading">
+          <h2>Smart Productivity Insights</h2>
+        </div>
+        <div className="insights-grid">
+          {insights.cards.map((card) => (
+            <article
+              key={card.id}
+              className={`insight-card${card.placeholder ? ' placeholder' : ''}`}
+            >
+              <p className="summary-label">{card.title}</p>
+              <p className="insight-value">{card.value}</p>
+              <p className="insight-detail">{card.detail}</p>
+            </article>
+          ))}
+        </div>
+        <div className="completion-trend">
+          <p className="summary-label">7-day completion trend</p>
+          <div className="completion-trend-bars" aria-hidden="true">
+            {insights.completionTrend.map((point) => {
+              const max = Math.max(
+                1,
+                ...insights.completionTrend.map((item) => item.completed),
+              )
+              const height = Math.max(
+                8,
+                Math.round((point.completed / max) * 64),
+              )
+              return (
+                <div key={point.date} className="completion-trend-col">
+                  <div
+                    className="completion-trend-bar"
+                    style={{ height: `${height}px` }}
+                    title={`${point.date}: ${point.completed}`}
+                  />
+                  <span>{point.date.slice(8)}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </section>
 
       <section className="analytics-panel analytics-summary-panel">
         <div className="section-heading">

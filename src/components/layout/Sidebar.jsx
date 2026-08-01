@@ -4,6 +4,7 @@ import {
   CalendarDays,
   Focus,
   BarChart3,
+  Inbox,
   Trash2,
   Plus,
   PanelLeftClose,
@@ -96,6 +97,17 @@ function Sidebar({
             <BarChart3 size={18} strokeWidth={1.75} />
           </span>
           <span className="nav-label">Analytics</span>
+        </button>
+        <button
+          type="button"
+          className={`nav-item${activePage === 'inbox' ? ' active' : ''}`}
+          title="AI Inbox"
+          onClick={() => onNavigate('inbox')}
+        >
+          <span className="nav-icon" aria-hidden="true">
+            <Inbox size={18} strokeWidth={1.75} />
+          </span>
+          <span className="nav-label">AI Inbox</span>
         </button>
         <div className="sidebar-nav-divider" aria-hidden="true" />
         <button

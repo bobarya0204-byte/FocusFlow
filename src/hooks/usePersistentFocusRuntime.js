@@ -1,18 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useLocalStorageState } from './useLocalStorageState'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getTodayLocalDate } from '../utils/dates'
 import {
   FOCUS_RUNTIME_KEY,
   applyTimerDuration,
   clearSelectedTaskIfMissing,
   getInitialFocusRuntime,
-  getStopwatchElapsedSeconds,
-  getTimerRemainingSeconds,
   isFocusRuntimeActive,
   interruptStopwatch,
   interruptTimer,
   pauseStopwatch,
   pauseTimer,
+  persistFocusRuntime,
   resolveFocusRuntime,
   setCustomMinutes as setRuntimeCustomMinutes,
   setFocusMode as setRuntimeFocusMode,
@@ -53,76 +51,133 @@ function appendUniqueSession(setFocusSessions, session) {
 }
 
 /**
- * Persisted timer/stopwatch engine. Lives above FocusPage so navigation
- * cannot lose an active session. Remaining/elapsed time is derived from
- * timestamps; the interval only refreshes UI and catches completions.
+ * Persisted timer/stopwatch engine.
+ * - Remaining/elapsed time is derived from timestamps (UI clocks locally).
+ * - localStorage is written only on meaningful events, not every tick.
+ * - Context consumers are not re-rendered on the display tick.
  */
 export function usePersistentFocusRuntime(tasks, setFocusSessions) {
-  const [focusRuntime, setFocusRuntime] = useLocalStorageState(
-    FOCUS_RUNTIME_KEY,
-    getInitialFocusRuntime,
-  )
-  const [focusClock, setFocusClock] = useState(() => Date.now())
+  const [focusRuntime, setFocusRuntime] = useState(getInitialFocusRuntime)
+  const runtimeRef = useRef(focusRuntime)
+  const tasksRef = useRef(tasks)
+  runtimeRef.current = focusRuntime
+  tasksRef.current = tasks
+
   const isActive = isFocusRuntimeActive(focusRuntime)
 
-  const settleRuntime = useCallback(
-    (runtime, now = Date.now()) => {
+  const persistCurrent = useCallback((runtime = runtimeRef.current) => {
+    persistFocusRuntime(runtime)
+  }, [])
+
+  const settleIfDue = useCallback(
+    (runtime, now = Date.now(), { persistOnComplete = true } = {}) => {
       const { runtime: nextRuntime, completedSession } = resolveFocusRuntime(
         runtime,
         now,
       )
 
-      if (completedSession) {
-        const linkedTask = findLinkedTask(
-          tasks,
-          completedSession.selectedTaskId,
-        )
-        appendUniqueSession(
-          setFocusSessions,
-          withLinkedTask(completedSession, linkedTask),
-        )
+      if (!completedSession) {
+        return { runtime, didComplete: false }
       }
 
-      return nextRuntime
+      const linkedTask = findLinkedTask(
+        tasksRef.current,
+        completedSession.selectedTaskId,
+      )
+      appendUniqueSession(
+        setFocusSessions,
+        withLinkedTask(completedSession, linkedTask),
+      )
+
+      if (persistOnComplete) {
+        persistFocusRuntime(nextRuntime)
+      }
+
+      return { runtime: nextRuntime, didComplete: true }
     },
-    [setFocusSessions, tasks],
+    [setFocusSessions],
   )
 
-  useEffect(() => {
-    function tick() {
-      const now = Date.now()
-      setFocusClock(now)
+  const commitRuntime = useCallback(
+    (updater, { persist = true } = {}) => {
       setFocusRuntime((current) => {
-        const next = settleRuntime(current, now)
-        return next === current ? current : next
+        const now = Date.now()
+        const settled = settleIfDue(current, now, { persistOnComplete: true })
+        const base = settled.runtime
+        const next =
+          typeof updater === 'function' ? updater(base, now) : updater
+
+        runtimeRef.current = next
+        if (persist) {
+          persistFocusRuntime(next)
+        }
+        return next
+      })
+    },
+    [settleIfDue],
+  )
+
+  // Completion polling only — does not rewrite storage unless a timer ends
+  useEffect(() => {
+    if (!isActive) {
+      return undefined
+    }
+
+    function checkCompletion() {
+      setFocusRuntime((current) => {
+        const { runtime: next, didComplete } = settleIfDue(
+          current,
+          Date.now(),
+          { persistOnComplete: true },
+        )
+        if (!didComplete) {
+          return current
+        }
+        runtimeRef.current = next
+        return next
       })
     }
 
-    // Always settle on mount / dependency change (covers refresh + overdue timers)
-    tick()
+    const intervalId = window.setInterval(checkCompletion, 250)
+    return () => window.clearInterval(intervalId)
+  }, [isActive, settleIfDue])
 
+  // Persist on hide/unload; settle overdue timers when returning
+  useEffect(() => {
     function handleVisibility() {
-      if (document.visibilityState === 'visible') {
-        tick()
+      if (document.visibilityState === 'hidden') {
+        persistCurrent()
+        return
       }
+
+      setFocusRuntime((current) => {
+        const { runtime: next, didComplete } = settleIfDue(
+          current,
+          Date.now(),
+          { persistOnComplete: true },
+        )
+        if (!didComplete) {
+          return current
+        }
+        runtimeRef.current = next
+        return next
+      })
+    }
+
+    function handlePageHide() {
+      persistCurrent()
     }
 
     document.addEventListener('visibilitychange', handleVisibility)
-    window.addEventListener('focus', tick)
-
-    // Only poll while a clock is running — paused/idle displays are static
-    const intervalId = isActive
-      ? window.setInterval(tick, 250)
-      : undefined
+    window.addEventListener('pagehide', handlePageHide)
+    window.addEventListener('beforeunload', handlePageHide)
 
     return () => {
-      if (intervalId != null) {
-        window.clearInterval(intervalId)
-      }
       document.removeEventListener('visibilitychange', handleVisibility)
-      window.removeEventListener('focus', tick)
+      window.removeEventListener('pagehide', handlePageHide)
+      window.removeEventListener('beforeunload', handlePageHide)
     }
-  }, [settleRuntime, setFocusRuntime, isActive])
+  }, [persistCurrent, settleIfDue])
 
   // Drop stale linked-task selection when that task is no longer available
   useEffect(() => {
@@ -130,40 +185,37 @@ export function usePersistentFocusRuntime(tasks, setFocusSessions) {
       const next = clearSelectedTaskIfMissing(current, (taskId) =>
         Boolean(findLinkedTask(tasks, taskId)),
       )
-      return next === current ? current : next
+      if (next === current) {
+        return current
+      }
+      runtimeRef.current = next
+      persistFocusRuntime(next)
+      return next
     })
-  }, [tasks, setFocusRuntime])
-
-  const updateRuntime = useCallback(
-    (updater) => {
-      setFocusRuntime((current) => {
-        const now = Date.now()
-        const settled = settleRuntime(current, now)
-        return typeof updater === 'function' ? updater(settled, now) : updater
-      })
-      setFocusClock(Date.now())
-    },
-    [setFocusRuntime, settleRuntime],
-  )
+  }, [tasks])
 
   const focusActions = useMemo(
     () => ({
       setFocusMode: (mode) => {
-        updateRuntime((runtime) => setRuntimeFocusMode(runtime, mode))
+        commitRuntime((runtime) => setRuntimeFocusMode(runtime, mode))
       },
       setSelectedTaskId: (taskId) => {
-        updateRuntime((runtime) => setRuntimeSelectedTaskId(runtime, taskId))
+        commitRuntime((runtime) => setRuntimeSelectedTaskId(runtime, taskId))
       },
       applyDuration: (minutes, durationMode) => {
-        updateRuntime((runtime) =>
+        commitRuntime((runtime) =>
           applyTimerDuration(runtime, minutes, durationMode),
         )
       },
       setCustomMinutes: (value) => {
-        updateRuntime((runtime) => setRuntimeCustomMinutes(runtime, value))
+        // Typing custom minutes should not hammer storage
+        commitRuntime(
+          (runtime) => setRuntimeCustomMinutes(runtime, value),
+          { persist: false },
+        )
       },
       selectCustomDuration: () => {
-        updateRuntime((runtime) => {
+        commitRuntime((runtime) => {
           const minutes = Math.max(1, Number(runtime.customMinutes) || 1)
           return applyTimerDuration(
             { ...runtime, customMinutes: minutes },
@@ -173,14 +225,17 @@ export function usePersistentFocusRuntime(tasks, setFocusSessions) {
         })
       },
       startTimer: () => {
-        updateRuntime((runtime, now) => startTimer(runtime, now))
+        commitRuntime((runtime, now) => startTimer(runtime, now))
       },
       pauseTimer: () => {
-        updateRuntime((runtime, now) => pauseTimer(runtime, now))
+        commitRuntime((runtime, now) => pauseTimer(runtime, now))
       },
       resetTimer: () => {
-        updateRuntime((runtime, now) => {
-          const linkedTask = findLinkedTask(tasks, runtime.selectedTaskId)
+        commitRuntime((runtime, now) => {
+          const linkedTask = findLinkedTask(
+            tasksRef.current,
+            runtime.selectedTaskId,
+          )
           const { runtime: nextRuntime, completedSession } = interruptTimer(
             runtime,
             linkedTask,
@@ -191,14 +246,17 @@ export function usePersistentFocusRuntime(tasks, setFocusSessions) {
         })
       },
       startStopwatch: () => {
-        updateRuntime((runtime, now) => startStopwatch(runtime, now))
+        commitRuntime((runtime, now) => startStopwatch(runtime, now))
       },
       pauseStopwatch: () => {
-        updateRuntime((runtime, now) => pauseStopwatch(runtime, now))
+        commitRuntime((runtime, now) => pauseStopwatch(runtime, now))
       },
       resetStopwatch: () => {
-        updateRuntime((runtime, now) => {
-          const linkedTask = findLinkedTask(tasks, runtime.selectedTaskId)
+        commitRuntime((runtime, now) => {
+          const linkedTask = findLinkedTask(
+            tasksRef.current,
+            runtime.selectedTaskId,
+          )
           const { runtime: nextRuntime, completedSession } = interruptStopwatch(
             runtime,
             linkedTask,
@@ -209,8 +267,11 @@ export function usePersistentFocusRuntime(tasks, setFocusSessions) {
         })
       },
       stopStopwatch: () => {
-        updateRuntime((runtime, now) => {
-          const linkedTask = findLinkedTask(tasks, runtime.selectedTaskId)
+        commitRuntime((runtime, now) => {
+          const linkedTask = findLinkedTask(
+            tasksRef.current,
+            runtime.selectedTaskId,
+          )
           const { runtime: nextRuntime, completedSession } = stopStopwatch(
             runtime,
             linkedTask,
@@ -221,21 +282,14 @@ export function usePersistentFocusRuntime(tasks, setFocusSessions) {
         })
       },
     }),
-    [setFocusSessions, tasks, updateRuntime],
+    [commitRuntime, setFocusSessions],
   )
 
   const derived = useMemo(() => {
-    const secondsLeft = getTimerRemainingSeconds(focusRuntime, focusClock)
-    const stopwatchSeconds = getStopwatchElapsedSeconds(
-      focusRuntime,
-      focusClock,
-    )
     const isTimerRunning = Boolean(focusRuntime.timerRunning)
     const isStopwatchRunning = Boolean(focusRuntime.stopwatchRunning)
 
     return {
-      secondsLeft,
-      stopwatchSeconds,
       isTimerRunning,
       isStopwatchRunning,
       isAnyModeRunning: isTimerRunning || isStopwatchRunning,
@@ -244,15 +298,16 @@ export function usePersistentFocusRuntime(tasks, setFocusSessions) {
           ? isTimerRunning
           : isStopwatchRunning,
     }
-  }, [focusRuntime, focusClock])
+  }, [focusRuntime])
 
   return useMemo(
     () => ({
       focusRuntime,
-      focusClock,
       focusActions,
       ...derived,
     }),
-    [focusRuntime, focusClock, focusActions, derived],
+    [focusRuntime, focusActions, derived],
   )
 }
+
+export { FOCUS_RUNTIME_KEY }

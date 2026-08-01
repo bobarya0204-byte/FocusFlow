@@ -3,6 +3,7 @@ import { Pencil, Trash2 } from 'lucide-react'
 import IconButton from '../ui/IconButton'
 import ProjectBadge from '../ui/ProjectBadge'
 import { formatDueDate, isTaskOverdue } from '../../utils/tasks'
+import { formatRecurrenceLabel } from '../../utils/recurrence'
 
 function TaskCard({
   task,
@@ -43,6 +44,11 @@ function TaskCard({
             <p className={`task-due${overdue ? ' overdue' : ''}`}>
               {overdue ? 'Overdue' : 'Due'} {formatDueDate(task.dueDate)}
             </p>
+          )}
+          {task.recurrence && (
+            <span className="task-recurrence-chip">
+              {formatRecurrenceLabel(task.recurrence)}
+            </span>
           )}
           {showProject && project && (
             <ProjectBadge

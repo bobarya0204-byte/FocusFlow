@@ -12,6 +12,7 @@ export const VALID_PAGES = [
   'planner',
   'focus',
   'analytics',
+  'inbox',
   'deleted',
 ]
 

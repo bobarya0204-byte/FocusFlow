@@ -1,9 +1,11 @@
 import { UNCATEGORIZED_PROJECT_ID } from './projects'
 import { getTodayLocalDate, normalizeDateValue } from './dates'
 import { normalizeDeletionFields } from './deletedItems'
+import { normalizeRecurrence } from './recurrence'
 import { readJson } from './storage'
 
 const VALID_PRIORITIES = new Set(['High', 'Medium', 'Low'])
+export const TASK_STATUSES = ['Open', 'In Progress', 'Completed']
 
 const DEFAULT_TASKS = [
   {
@@ -53,6 +55,27 @@ export const DEFAULT_SORT = 'due-earliest'
 
 export function normalizePriority(priority) {
   return VALID_PRIORITIES.has(priority) ? priority : 'Medium'
+}
+
+export function normalizeTaskStatus(status, completed = false) {
+  if (completed || status === 'Completed') {
+    return 'Completed'
+  }
+  if (status === 'In Progress') {
+    return 'In Progress'
+  }
+  return 'Open'
+}
+
+export function normalizeEstimatedMinutes(value) {
+  if (value == null || value === '') {
+    return null
+  }
+  const number = Number(value)
+  if (!Number.isFinite(number) || number < 0) {
+    return null
+  }
+  return Math.round(number)
 }
 
 export function compareTaskIds(a, b) {
@@ -108,6 +131,8 @@ function normalizeTasks(tasks) {
         : status === 'Completed'
 
     const deletion = normalizeDeletionFields(task)
+    const taskStatus = normalizeTaskStatus(status, completed)
+    const recurrence = normalizeRecurrence(task.recurrence)
     const normalizedTask = {
       ...rest,
       id: toTaskId(task.id, taskIndex),
@@ -115,15 +140,27 @@ function normalizeTasks(tasks) {
         typeof task.title === 'string'
           ? task.title.trim() || 'Untitled task'
           : 'Untitled task',
+      description:
+        typeof task.description === 'string' ? task.description : '',
+      notes: typeof task.notes === 'string' ? task.notes : '',
       priority: normalizePriority(task.priority),
-      completed,
+      status: taskStatus,
+      completed: taskStatus === 'Completed' ? true : completed,
+      completedAt:
+        taskStatus === 'Completed'
+          ? task.completedAt || task.updatedAt || null
+          : null,
       dueDate: normalizeDateValue(task.dueDate),
       plannedDate: normalizeDateValue(task.plannedDate),
+      estimatedMinutes: normalizeEstimatedMinutes(task.estimatedMinutes),
       createdAt: task.createdAt || null,
       updatedAt: task.updatedAt || task.createdAt || null,
       projectId: task.projectId || UNCATEGORIZED_PROJECT_ID,
       deleted: deletion.deleted,
       deletedAt: deletion.deletedAt,
+      recurrence,
+      seriesId: task.seriesId ? String(task.seriesId) : null,
+      occurrenceDate: normalizeDateValue(task.occurrenceDate),
     }
 
     const migratedTasks = (Array.isArray(subtasks) ? subtasks : []).map(
@@ -135,15 +172,25 @@ function normalizeTasks(tasks) {
             typeof subtask.title === 'string' && subtask.title.trim()
               ? subtask.title.trim()
               : 'Untitled task',
+          description: '',
+          notes: '',
           projectId: normalizedTask.projectId,
           priority: normalizedTask.priority,
+          status: Boolean(subtask.completed) ? 'Completed' : 'Open',
           plannedDate: normalizedTask.plannedDate,
           dueDate: normalizedTask.dueDate,
+          estimatedMinutes: null,
           completed: Boolean(subtask.completed),
+          completedAt: Boolean(subtask.completed)
+            ? normalizedTask.updatedAt
+            : null,
           createdAt: normalizedTask.createdAt,
           updatedAt: normalizedTask.updatedAt,
           deleted: false,
           deletedAt: null,
+          recurrence: null,
+          seriesId: null,
+          occurrenceDate: null,
         }
       },
     )
