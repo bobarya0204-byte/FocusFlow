@@ -1,8 +1,10 @@
 import {
   LayoutDashboard,
   ListTodo,
+  CalendarDays,
   Focus,
   BarChart3,
+  Trash2,
   Plus,
   PanelLeftClose,
   PanelLeftOpen,
@@ -14,6 +16,7 @@ function Sidebar({
   activePage,
   onNavigate,
   onAddTask,
+  deletedCount = 0,
 }) {
   return (
     <aside className={`sidebar${isCollapsed ? ' collapsed' : ''}`}>
@@ -63,6 +66,17 @@ function Sidebar({
         </button>
         <button
           type="button"
+          className={`nav-item${activePage === 'planner' ? ' active' : ''}`}
+          title="Planner"
+          onClick={() => onNavigate('planner')}
+        >
+          <span className="nav-icon" aria-hidden="true">
+            <CalendarDays size={18} strokeWidth={1.75} />
+          </span>
+          <span className="nav-label">Planner</span>
+        </button>
+        <button
+          type="button"
           className={`nav-item${activePage === 'focus' ? ' active' : ''}`}
           title="Focus"
           onClick={() => onNavigate('focus')}
@@ -82,6 +96,21 @@ function Sidebar({
             <BarChart3 size={18} strokeWidth={1.75} />
           </span>
           <span className="nav-label">Analytics</span>
+        </button>
+        <div className="sidebar-nav-divider" aria-hidden="true" />
+        <button
+          type="button"
+          className={`nav-item${activePage === 'deleted' ? ' active' : ''}`}
+          title="Deleted Items"
+          onClick={() => onNavigate('deleted')}
+        >
+          <span className="nav-icon" aria-hidden="true">
+            <Trash2 size={18} strokeWidth={1.75} />
+          </span>
+          <span className="nav-label">
+            Deleted Items
+            {deletedCount > 0 ? ` (${deletedCount})` : ''}
+          </span>
         </button>
       </nav>
 

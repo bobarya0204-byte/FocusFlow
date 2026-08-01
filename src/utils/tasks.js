@@ -1,30 +1,49 @@
+import { UNCATEGORIZED_PROJECT_ID } from './projects'
+import { getTodayLocalDate, normalizeDateValue } from './dates'
+import { normalizeDeletionFields } from './deletedItems'
+import { readJson } from './storage'
+
+const VALID_PRIORITIES = new Set(['High', 'Medium', 'Low'])
+
 const DEFAULT_TASKS = [
   {
-    id: 1,
+    id: 'task-1',
     title: 'Finish presentation',
     priority: 'High',
     completed: false,
     dueDate: '2026-07-20',
+    plannedDate: null,
+    createdAt: null,
+    updatedAt: null,
+    projectId: UNCATEGORIZED_PROJECT_ID,
   },
   {
-    id: 2,
+    id: 'task-2',
     title: 'Review project report',
     priority: 'Medium',
     completed: false,
     dueDate: '2026-07-29',
+    plannedDate: null,
+    createdAt: null,
+    updatedAt: null,
+    projectId: UNCATEGORIZED_PROJECT_ID,
   },
   {
-    id: 3,
+    id: 'task-3',
     title: "Plan tomorrow's schedule",
     priority: 'Low',
     completed: true,
     dueDate: '2026-07-25',
+    plannedDate: null,
+    createdAt: null,
+    updatedAt: null,
+    projectId: UNCATEGORIZED_PROJECT_ID,
   },
 ]
 
 export const TASKS_STORAGE_KEY = 'focusflow-tasks'
 
-export const PRIORITY_RANK = {
+const PRIORITY_RANK = {
   High: 3,
   Medium: 2,
   Low: 1,
@@ -32,45 +51,139 @@ export const PRIORITY_RANK = {
 
 export const DEFAULT_SORT = 'due-earliest'
 
-export function normalizeTasks(tasks) {
-  return tasks.map((task) => {
-    const { status, ...rest } = task
+export function normalizePriority(priority) {
+  return VALID_PRIORITIES.has(priority) ? priority : 'Medium'
+}
+
+export function compareTaskIds(a, b) {
+  return String(a) === String(b)
+}
+
+/** Stable string IDs for new tasks (and migrated legacy numeric IDs). */
+export function createTaskId() {
+  return `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+export function toTaskId(value, fallbackIndex = 0) {
+  if (value == null || value === '') {
+    return `task-${fallbackIndex}-${Date.now()}`
+  }
+  return String(value)
+}
+
+/** Normalize titles for duplicate checks (trim + case-insensitive). */
+export function normalizeTaskTitle(title) {
+  return typeof title === 'string' ? title.trim().toLowerCase() : ''
+}
+
+export function hasDuplicateTaskTitle(tasks, title, excludeTaskId = null) {
+  const normalized = normalizeTaskTitle(title)
+  if (!normalized || !Array.isArray(tasks)) {
+    return false
+  }
+
+  return tasks.some((task) => {
+    if (
+      excludeTaskId != null &&
+      compareTaskIds(task.id, excludeTaskId)
+    ) {
+      return false
+    }
+    return normalizeTaskTitle(task.title) === normalized
+  })
+}
+
+function normalizeTasks(tasks) {
+  if (!Array.isArray(tasks)) {
+    return []
+  }
+
+  let migrationOffset = 0
+
+  return tasks.flatMap((task, taskIndex) => {
+    const { status, subtasks, ...rest } = task
     const completed =
       typeof task.completed === 'boolean'
         ? task.completed
         : status === 'Completed'
 
-    return {
+    const deletion = normalizeDeletionFields(task)
+    const normalizedTask = {
       ...rest,
+      id: toTaskId(task.id, taskIndex),
+      title:
+        typeof task.title === 'string'
+          ? task.title.trim() || 'Untitled task'
+          : 'Untitled task',
+      priority: normalizePriority(task.priority),
       completed,
+      dueDate: normalizeDateValue(task.dueDate),
+      plannedDate: normalizeDateValue(task.plannedDate),
+      createdAt: task.createdAt || null,
+      updatedAt: task.updatedAt || task.createdAt || null,
+      projectId: task.projectId || UNCATEGORIZED_PROJECT_ID,
+      deleted: deletion.deleted,
+      deletedAt: deletion.deletedAt,
     }
+
+    const migratedTasks = (Array.isArray(subtasks) ? subtasks : []).map(
+      (subtask, index) => {
+        migrationOffset += 1
+        return {
+          id: `migrated-${normalizedTask.id}-${index}-${migrationOffset}`,
+          title:
+            typeof subtask.title === 'string' && subtask.title.trim()
+              ? subtask.title.trim()
+              : 'Untitled task',
+          projectId: normalizedTask.projectId,
+          priority: normalizedTask.priority,
+          plannedDate: normalizedTask.plannedDate,
+          dueDate: normalizedTask.dueDate,
+          completed: Boolean(subtask.completed),
+          createdAt: normalizedTask.createdAt,
+          updatedAt: normalizedTask.updatedAt,
+          deleted: false,
+          deletedAt: null,
+        }
+      },
+    )
+
+    return [normalizedTask, ...migratedTasks]
   })
 }
 
-export function getInitialTasks() {
-  const saved = localStorage.getItem(TASKS_STORAGE_KEY)
-  if (!saved) {
-    return DEFAULT_TASKS
+export function reconcileTaskProjects(tasks, projects) {
+  const validIds = new Set(
+    (Array.isArray(projects) ? projects : []).map((project) => project.id),
+  )
+
+  if (validIds.size === 0) {
+    validIds.add(UNCATEGORIZED_PROJECT_ID)
   }
 
-  try {
-    const parsed = JSON.parse(saved)
-    if (Array.isArray(parsed)) {
-      return normalizeTasks(parsed)
+  let changed = false
+  const nextTasks = tasks.map((task) => {
+    if (validIds.has(task.projectId)) {
+      return task
     }
-  } catch {
-    // Ignore invalid JSON and fall back to defaults
-  }
 
-  return DEFAULT_TASKS
+    changed = true
+    return {
+      ...task,
+      projectId: UNCATEGORIZED_PROJECT_ID,
+      updatedAt: new Date().toISOString(),
+    }
+  })
+
+  return changed ? nextTasks : tasks
 }
 
-export function getTodayLocalDate() {
-  const now = new Date()
-  const year = now.getFullYear()
-  const month = String(now.getMonth() + 1).padStart(2, '0')
-  const day = String(now.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
+export function getInitialTasks() {
+  const parsed = readJson(TASKS_STORAGE_KEY, null)
+  if (Array.isArray(parsed)) {
+    return normalizeTasks(parsed)
+  }
+  return DEFAULT_TASKS
 }
 
 export function isTaskOverdue(task) {
@@ -82,8 +195,16 @@ export function isTaskOverdue(task) {
 }
 
 export function formatDueDate(dueDate) {
+  if (!dueDate) {
+    return ''
+  }
+
   const [year, month, day] = dueDate.split('-').map(Number)
   const date = new Date(year, month - 1, day)
+
+  if (Number.isNaN(date.getTime())) {
+    return dueDate
+  }
 
   return date.toLocaleDateString(undefined, {
     month: 'short',
@@ -101,12 +222,35 @@ export function getTaskCounts(tasks) {
   }
 }
 
-export function filterAndSortTasks(tasks, { search, status, priority, sort }) {
+export function groupTasksByProjectId(tasks) {
+  const groups = new Map()
+
+  tasks.forEach((task) => {
+    const projectId = task.projectId || UNCATEGORIZED_PROJECT_ID
+    if (!groups.has(projectId)) {
+      groups.set(projectId, [])
+    }
+    groups.get(projectId).push(task)
+  })
+
+  return groups
+}
+
+export function filterAndSortTasks(
+  tasks,
+  {
+    search = '',
+    status = 'all',
+    priority = 'all',
+    project = 'all',
+    sort = DEFAULT_SORT,
+  },
+) {
   const query = search.trim().toLowerCase()
 
   const filtered = tasks.filter((task) => {
-    const matchesSearch =
-      query === '' || task.title.toLowerCase().includes(query)
+    const title = typeof task.title === 'string' ? task.title : ''
+    const matchesSearch = query === '' || title.toLowerCase().includes(query)
 
     let matchesStatus = true
     if (status === 'open') {
@@ -117,10 +261,16 @@ export function filterAndSortTasks(tasks, { search, status, priority, sort }) {
       matchesStatus = isTaskOverdue(task)
     }
 
-    const matchesPriority =
-      priority === 'all' || task.priority === priority
+    const matchesPriority = priority === 'all' || task.priority === priority
 
-    return matchesSearch && matchesStatus && matchesPriority
+    const matchesProject =
+      !project ||
+      project === 'all' ||
+      (task.projectId || UNCATEGORIZED_PROJECT_ID) === project
+
+    return (
+      matchesSearch && matchesStatus && matchesPriority && matchesProject
+    )
   })
 
   const sorted = [...filtered]
@@ -146,9 +296,22 @@ export function filterAndSortTasks(tasks, { search, status, priority, sort }) {
       return sort === 'priority-high' ? bRank - aRank : aRank - bRank
     }
 
-    // Recently added — higher id (Date.now) first
-    return b.id - a.id
+    const aCreated = a.createdAt || ''
+    const bCreated = b.createdAt || ''
+    if (aCreated || bCreated) {
+      return bCreated.localeCompare(aCreated)
+    }
+
+    const aId = Number(a.id)
+    const bId = Number(b.id)
+    if (!Number.isNaN(aId) && !Number.isNaN(bId)) {
+      return bId - aId
+    }
+
+    return String(b.id).localeCompare(String(a.id))
   })
 
   return sorted
 }
+
+export { getTodayLocalDate }

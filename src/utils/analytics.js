@@ -1,8 +1,10 @@
-import { getTaskCounts, isTaskOverdue, getTodayLocalDate } from './tasks'
+import { getTodayLocalDate, getLocalDateKey } from './dates'
+import { getTaskCounts } from './tasks'
 import {
   formatFocusDuration,
-  getLocalDateKey,
+  getSessionDurationSeconds,
   getTodayFocusStats,
+  isCompletedSession,
 } from './focus'
 
 export function getPriorityCounts(tasks) {
@@ -26,18 +28,27 @@ export function getTasksCompletedToday(tasks) {
 }
 
 export function getFocusTotals(sessions) {
-  const totalMinutes = sessions.reduce(
-    (sum, session) => sum + (session.durationMinutes || 0),
+  const completedSessions = sessions.filter(isCompletedSession)
+  const totalSeconds = sessions.reduce(
+    (sum, session) => sum + getSessionDurationSeconds(session),
     0,
   )
-  const sessionCount = sessions.length
-  const averageMinutes =
-    sessionCount === 0 ? 0 : Math.round(totalMinutes / sessionCount)
+  const completedSeconds = completedSessions.reduce(
+    (sum, session) => sum + getSessionDurationSeconds(session),
+    0,
+  )
+  const completedCount = completedSessions.length
+  const averageSeconds =
+    completedCount === 0 ? 0 : Math.round(completedSeconds / completedCount)
 
   return {
-    sessionCount,
-    totalMinutes,
-    averageMinutes,
+    // Completion metrics — interrupted sessions do not inflate these
+    sessionCount: completedCount,
+    completedSessionCount: completedCount,
+    interruptedSessionCount: sessions.length - completedCount,
+    // Time includes every recorded session (completed + interrupted)
+    totalMinutes: totalSeconds / 60,
+    averageMinutes: averageSeconds / 60,
   }
 }
 
@@ -69,7 +80,7 @@ export function buildProductivitySummary(tasks, sessions) {
   }
 
   lines.push(
-    `Today: ${completedToday} task${completedToday === 1 ? '' : 's'} completed and ${formatFocusDuration(todayFocus.totalMinutes)} of focus across ${todayFocus.sessionsCompleted} session${todayFocus.sessionsCompleted === 1 ? '' : 's'}.`,
+    `Today: ${completedToday} task${completedToday === 1 ? '' : 's'} completed and ${formatFocusDuration(todayFocus.totalMinutes)} of focus across ${todayFocus.sessionsCompleted} completed session${todayFocus.sessionsCompleted === 1 ? '' : 's'}.`,
   )
 
   if (counts.overdue > 0) {
@@ -128,7 +139,8 @@ export function getAnalyticsStats(tasks, sessions) {
     completionRate,
     priorities,
     completedToday,
-    focusSessions: focusTotals.sessionCount,
+    focusSessions: focusTotals.completedSessionCount,
+    interruptedFocusSessions: focusTotals.interruptedSessionCount,
     totalFocusMinutes: focusTotals.totalMinutes,
     averageFocusMinutes: focusTotals.averageMinutes,
     summaryLines: buildProductivitySummary(tasks, sessions),
@@ -142,6 +154,3 @@ export function getPriorityBarWidth(count, total) {
 
   return `${Math.max(8, Math.round((count / total) * 100))}%`
 }
-
-// Re-export for callers that need overdue checks alongside analytics
-export { isTaskOverdue }

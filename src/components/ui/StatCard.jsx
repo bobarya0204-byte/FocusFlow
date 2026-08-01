@@ -1,3 +1,5 @@
+import { memo } from 'react'
+
 function StatCard({ label, value, tone = '' }) {
   return (
     <article className="summary-card">
@@ -7,4 +9,4 @@ function StatCard({ label, value, tone = '' }) {
   )
 }
 
-export default StatCard
+export default memo(StatCard)
