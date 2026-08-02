@@ -12,6 +12,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@azure/msal-browser": "^5.17.3",
+    "@azure/msal-react": "^5.5.4",
     "@microsoft/teams-js": "^2.54.0",
     "lucide-react": "^1.27.0",
     "react": "^19.2.7",

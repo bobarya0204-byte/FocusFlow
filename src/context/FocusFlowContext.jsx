@@ -7,17 +7,16 @@ import {
   useRef,
   useState,
 } from 'react'
-import { useLocalStorageState } from '../hooks/useLocalStorageState'
+import { useRepositoryState } from '../hooks/useRepositoryState'
+import { useAuth } from '../auth'
+import { getRepository } from '../services/repositories/RepositoryFactory'
+import { REPOSITORY_KEYS } from '../services/repositories/IDataRepository'
 import { useDismissOnOutsidePointer } from '../hooks/useDismissOnOutsidePointer'
 import { usePersistentFocusRuntime } from '../hooks/usePersistentFocusRuntime'
 import {
-  FOCUS_SESSIONS_KEY,
   getInitialFocusSessions,
 } from '../utils/focus'
 import {
-  ACTIVE_PAGE_KEY,
-  PROJECT_FILTER_KEY,
-  SIDEBAR_COLLAPSED_KEY,
   getInitialActivePage,
   getInitialProjectFilter,
   getInitialSidebarCollapsed,
@@ -27,7 +26,6 @@ import {
 import {
   PROJECT_COLORS,
   PROJECT_ICONS,
-  PROJECTS_STORAGE_KEY,
   UNCATEGORIZED_PROJECT_ID,
   getInitialProjects,
 } from '../utils/projects'
@@ -45,7 +43,6 @@ import {
   softDeleteTask,
 } from '../utils/deletedItems'
 import {
-  TASKS_STORAGE_KEY,
   compareTaskIds,
   createTaskId,
   getInitialTasks,
@@ -74,16 +71,25 @@ function createInitialTasks() {
 }
 
 export function FocusFlowProvider({ children }) {
-  const [projects, setProjects] = useLocalStorageState(
-    PROJECTS_STORAGE_KEY,
+  const { user, authenticationMode } = useAuth()
+  const repository = useMemo(
+    () => getRepository({ user, authenticationMode }),
+    [user, authenticationMode],
+  )
+
+  const [projects, setProjects] = useRepositoryState(
+    repository,
+    REPOSITORY_KEYS.PROJECTS,
     getInitialProjects,
   )
-  const [tasks, setTasks] = useLocalStorageState(
-    TASKS_STORAGE_KEY,
+  const [tasks, setTasks] = useRepositoryState(
+    repository,
+    REPOSITORY_KEYS.TASKS,
     createInitialTasks,
   )
-  const [focusSessions, setFocusSessions] = useLocalStorageState(
-    FOCUS_SESSIONS_KEY,
+  const [focusSessions, setFocusSessions] = useRepositoryState(
+    repository,
+    REPOSITORY_KEYS.FOCUS_SESSIONS,
     getInitialFocusSessions,
   )
 
@@ -94,16 +100,19 @@ export function FocusFlowProvider({ children }) {
 
   const focusRuntimeApi = usePersistentFocusRuntime(liveTasks, setFocusSessions)
 
-  const [activePage, setActivePageState] = useLocalStorageState(
-    ACTIVE_PAGE_KEY,
+  const [activePage, setActivePageState] = useRepositoryState(
+    repository,
+    REPOSITORY_KEYS.ACTIVE_PAGE,
     getInitialActivePage,
   )
-  const [projectFilter, setProjectFilterState] = useLocalStorageState(
-    PROJECT_FILTER_KEY,
+  const [projectFilter, setProjectFilterState] = useRepositoryState(
+    repository,
+    REPOSITORY_KEYS.PROJECT_FILTER,
     getInitialProjectFilter,
   )
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useLocalStorageState(
-    SIDEBAR_COLLAPSED_KEY,
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useRepositoryState(
+    repository,
+    REPOSITORY_KEYS.SIDEBAR_COLLAPSED,
     getInitialSidebarCollapsed,
   )
   const [projectMenuOpenId, setProjectMenuOpenId] = useState(null)

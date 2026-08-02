@@ -21,6 +21,16 @@ function readBoolean(key, fallback = false) {
   return raw === 'true' || raw === '1' || raw === 'yes'
 }
 
+function readFirstEnv(keys, fallback = '') {
+  for (const key of keys) {
+    const value = readEnv(key, '')
+    if (value !== '') {
+      return value
+    }
+  }
+  return fallback
+}
+
 export const appEnv = {
   /** development | production | staging (informational) */
   name: readEnv('VITE_APP_NAME', 'FocusFlow'),
@@ -37,15 +47,75 @@ export const appEnv = {
    */
   teamsEnabled: readBoolean('VITE_TEAMS_ENABLED', true),
 
-  /** Reserved for future Microsoft Entra ID / Teams SSO (Phase 2+) */
-  azureAdClientId: readEnv('VITE_AZURE_AD_CLIENT_ID', ''),
-  azureAdTenantId: readEnv('VITE_AZURE_AD_TENANT_ID', ''),
-  azureAdRedirectUri: readEnv('VITE_AZURE_AD_REDIRECT_URI', ''),
+  /** Microsoft Entra ID — primary variable names (Step 2+) */
+  azureClientId: readFirstEnv([
+    'VITE_AZURE_CLIENT_ID',
+    'VITE_AZURE_AD_CLIENT_ID',
+  ]),
+  azureTenantId: readFirstEnv([
+    'VITE_AZURE_TENANT_ID',
+    'VITE_AZURE_AD_TENANT_ID',
+  ]),
+  azureAuthority: readEnv('VITE_AZURE_AUTHORITY', ''),
+  azureRedirectUri: readFirstEnv([
+    'VITE_AZURE_REDIRECT_URI',
+    'VITE_AZURE_AD_REDIRECT_URI',
+  ]),
+  azurePostLogoutRedirectUri: readEnv(
+    'VITE_AZURE_POST_LOGOUT_REDIRECT_URI',
+    '',
+  ),
+
+  /** @deprecated Use azureClientId — kept for legacy env files */
+  azureAdClientId: readFirstEnv([
+    'VITE_AZURE_AD_CLIENT_ID',
+    'VITE_AZURE_CLIENT_ID',
+  ]),
+  /** @deprecated Use azureTenantId */
+  azureAdTenantId: readFirstEnv([
+    'VITE_AZURE_AD_TENANT_ID',
+    'VITE_AZURE_TENANT_ID',
+  ]),
+  /** @deprecated Use azureRedirectUri */
+  azureAdRedirectUri: readFirstEnv([
+    'VITE_AZURE_AD_REDIRECT_URI',
+    'VITE_AZURE_REDIRECT_URI',
+  ]),
 
   /** Reserved for future API / sync backend */
   apiBaseUrl: readEnv('VITE_API_BASE_URL', ''),
 }
 
+/**
+ * Single-tenant authority URL for MSAL.
+ * Uses VITE_AZURE_AUTHORITY when set, otherwise builds from tenant id.
+ */
+export function getAzureAuthority() {
+  if (appEnv.azureAuthority) {
+    return appEnv.azureAuthority
+  }
+
+  if (appEnv.azureTenantId) {
+    return `https://login.microsoftonline.com/${appEnv.azureTenantId}`
+  }
+
+  return ''
+}
+
+/** True when minimum Entra registration values are present in the environment. */
+export function isAzureAuthConfigured() {
+  return Boolean(appEnv.azureClientId && getAzureAuthority())
+}
+
+/**
+ * Whether interactive Entra authentication is enabled.
+ * Step 3A: default false — LOCAL mode stays active while configuration is validated.
+ */
+export function isLiveEntraAuthEnabled() {
+  return readBoolean('VITE_AZURE_AUTH_ENABLED', false)
+}
+
+/** @deprecated Use isAzureAuthConfigured */
 export function isTeamsAuthConfigured() {
-  return Boolean(appEnv.azureAdClientId && appEnv.azureAdTenantId)
+  return isAzureAuthConfigured()
 }
