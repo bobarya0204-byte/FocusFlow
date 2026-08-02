@@ -2180,14 +2180,20 @@
 }
 
 .planner-week-grid {
+  --planner-day-min-width: 200px;
   display: grid;
-  grid-template-columns: repeat(7, minmax(132px, 1fr));
+  grid-template-columns: repeat(7, minmax(var(--planner-day-min-width), 1fr));
   gap: 8px;
-  overflow-x: auto;
+  /* Prefer horizontal scroll over crushing day columns in narrow hosts (e.g. Teams) */
+  min-width: max(
+    100%,
+    calc(7 * var(--planner-day-min-width) + 6 * 8px)
+  );
   padding-bottom: 8px;
 }
 
 .planner-day-column {
+  min-width: var(--planner-day-min-width, 200px);
   min-height: 430px;
   background: var(--ff-surface);
   border: 1px solid var(--ff-border);
@@ -2278,6 +2284,19 @@
   min-width: 0;
 }
 
+.planner-task-title-btn {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
 .planner-task-title,
 .planner-task-content p {
   margin: 0 0 6px;
@@ -2285,7 +2304,10 @@
   font-size: var(--ff-text-sm);
   font-weight: 500;
   line-height: 1.35;
-  overflow-wrap: anywhere;
+  /* Wrap on word boundaries — never one character per line */
+  overflow-wrap: break-word;
+  word-break: normal;
+  hyphens: none;
 }
 
 .planner-task-item.completed .planner-task-content p {
@@ -2419,10 +2441,16 @@
 
 .planner-calendar-area {
   min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
 }
 
 .planner-week-grid {
-  grid-template-columns: repeat(7, minmax(145px, 1fr));
+  --planner-day-min-width: 200px;
+  grid-template-columns: repeat(7, minmax(var(--planner-day-min-width), 1fr));
 }
 
 .planner-day-column {
@@ -2470,6 +2498,9 @@
 }
 
 .planner-task-item {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
   cursor: grab;
 }
 
@@ -3116,7 +3147,8 @@
   }
 
   .planner-week-grid {
-    grid-template-columns: repeat(7, minmax(150px, 1fr));
+    --planner-day-min-width: 200px;
+    grid-template-columns: repeat(7, minmax(var(--planner-day-min-width), 1fr));
   }
 
   .planner-navigation {

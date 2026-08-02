@@ -1,0 +1,37 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.27/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.27",
+  "version": "1.0.0",
+  "id": "30478c37-25fc-4144-a745-24341544b572",
+  "developer": {
+    "name": "FocusFlow",
+    "websiteUrl": "https://blue-beach-09f02a110.7.azurestaticapps.net",
+    "privacyUrl": "https://blue-beach-09f02a110.7.azurestaticapps.net",
+    "termsOfUseUrl": "https://blue-beach-09f02a110.7.azurestaticapps.net"
+  },
+  "name": {
+    "short": "FocusFlow",
+    "full": "FocusFlow"
+  },
+  "description": {
+    "short": "Personal productivity workspace.",
+    "full": "FocusFlow helps users manage projects, plan work, track focus sessions, review analytics and improve productivity inside Microsoft Teams."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#6B8AFD",
+  "staticTabs": [
+    {
+      "entityId": "focusflow",
+      "name": "Home",
+      "contentUrl": "https://blue-beach-09f02a110.7.azurestaticapps.net/",
+      "websiteUrl": "https://blue-beach-09f02a110.7.azurestaticapps.net/",
+      "scopes": ["personal"]
+    }
+  ],
+  "validDomains": [
+    "blue-beach-09f02a110.7.azurestaticapps.net"
+  ]
+}
