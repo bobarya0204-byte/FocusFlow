@@ -22,24 +22,25 @@ function Sidebar({
   return (
     <aside className={`sidebar${isCollapsed ? ' collapsed' : ''}`}>
       <div className="sidebar-header">
-        <div className="sidebar-brand">
-          <span className="brand-mark" aria-hidden="true">
+        <div className="sidebar-header-row">
+          <span className="sidebar-app-avatar" aria-label="FocusFlow">
             F
           </span>
-          <span className="brand-text">FocusFlow</span>
+          <p className="sidebar-title">FocusFlow</p>
+          <button
+            type="button"
+            className="sidebar-toggle"
+            onClick={onToggleCollapse}
+            aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            {isCollapsed ? (
+              <PanelLeftOpen size={16} strokeWidth={1.75} aria-hidden="true" />
+            ) : (
+              <PanelLeftClose size={16} strokeWidth={1.75} aria-hidden="true" />
+            )}
+          </button>
         </div>
-        <button
-          type="button"
-          className="sidebar-toggle"
-          onClick={onToggleCollapse}
-          aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        >
-          {isCollapsed ? (
-            <PanelLeftOpen size={16} strokeWidth={1.75} aria-hidden="true" />
-          ) : (
-            <PanelLeftClose size={16} strokeWidth={1.75} aria-hidden="true" />
-          )}
-        </button>
+        <div className="sidebar-title-divider" aria-hidden="true" />
       </div>
 
       <nav className="sidebar-nav">
