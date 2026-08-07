@@ -14,6 +14,7 @@ export const VALID_PAGES = [
   'analytics',
   'inbox',
   'deleted',
+  'settings',
 ]
 
 export function normalizeActivePage(value) {

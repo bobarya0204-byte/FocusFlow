@@ -1,9 +1,11 @@
 import {
   fromLocalDateKey,
+  getTodayLocalDate,
   isValidDateKey,
   toLocalDateKey,
 } from './dates'
 import { UNCATEGORIZED_PROJECT_ID } from './projects'
+import { expandTasksForDate } from './virtualTasks'
 import { readJson, writeJson } from './storage'
 
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -12,12 +14,67 @@ export { DAY_NAMES, toLocalDateKey, fromLocalDateKey }
 
 export const PLANNER_STORAGE_KEY = 'focusflow-planner'
 
+/**
+ * Resolve the "today" date key recorded at the last planner session.
+ * Supports legacy state that did not persist this field.
+ *
+ * @param {Record<string, unknown>|null} parsed
+ * @param {string} currentToday
+ * @returns {string|null}
+ */
+export function resolveLastSessionTodayDate(parsed, currentToday) {
+  if (parsed && isValidDateKey(parsed.lastSessionTodayDate)) {
+    return parsed.lastSessionTodayDate
+  }
+
+  if (!parsed || !isValidDateKey(parsed.selectedDate)) {
+    return null
+  }
+
+  // Legacy fallback: yesterday's selection likely meant "today" at last session.
+  const yesterday = toLocalDateKey(addDays(fromLocalDateKey(currentToday), -1))
+  if (parsed.selectedDate === yesterday) {
+    return yesterday
+  }
+
+  return null
+}
+
+/**
+ * Advance planner selection to the current day when it was tracking "today"
+ * at the previous session and the calendar day has rolled over.
+ *
+ * @param {Record<string, unknown>} state
+ * @param {string} [currentToday]
+ */
+export function reconcilePlannerSelection(state, currentToday = getTodayLocalDate()) {
+  const lastSessionTodayDate = resolveLastSessionTodayDate(state, currentToday)
+  const wasTrackingToday =
+    lastSessionTodayDate != null && state.selectedDate === lastSessionTodayDate
+
+  if (wasTrackingToday && lastSessionTodayDate < currentToday) {
+    return {
+      ...state,
+      selectedDate: currentToday,
+      anchorDate: currentToday,
+      lastSessionTodayDate: currentToday,
+    }
+  }
+
+  return {
+    ...state,
+    lastSessionTodayDate: currentToday,
+  }
+}
+
 export function getInitialPlannerState() {
+  const currentToday = getTodayLocalDate()
   const fallback = {
     view: 'week',
-    selectedDate: toLocalDateKey(new Date()),
-    anchorDate: toLocalDateKey(new Date()),
+    selectedDate: currentToday,
+    anchorDate: currentToday,
     isUnplannedCollapsed: false,
+    lastSessionTodayDate: currentToday,
   }
 
   const parsed = readJson(PLANNER_STORAGE_KEY, null)
@@ -25,7 +82,7 @@ export function getInitialPlannerState() {
     return fallback
   }
 
-  return {
+  const hydrated = {
     view: parsed.view === 'month' ? 'month' : 'week',
     selectedDate: isValidDateKey(parsed.selectedDate)
       ? parsed.selectedDate
@@ -36,11 +93,20 @@ export function getInitialPlannerState() {
         ? parsed.selectedDate
         : fallback.anchorDate,
     isUnplannedCollapsed: Boolean(parsed.isUnplannedCollapsed),
+    lastSessionTodayDate: resolveLastSessionTodayDate(parsed, currentToday),
   }
+
+  return reconcilePlannerSelection(hydrated, currentToday)
 }
 
 export function persistPlannerState(plannerState) {
-  writeJson(PLANNER_STORAGE_KEY, plannerState)
+  writeJson(PLANNER_STORAGE_KEY, {
+    view: plannerState.view,
+    selectedDate: plannerState.selectedDate,
+    anchorDate: plannerState.anchorDate,
+    isUnplannedCollapsed: plannerState.isUnplannedCollapsed,
+    lastSessionTodayDate: getTodayLocalDate(),
+  })
 }
 
 export function addDays(date, amount) {
@@ -126,8 +192,7 @@ export function formatPlannerHeading(date, view) {
 }
 
 export function getTasksForDate(tasks, date) {
-  const dateKey = typeof date === 'string' ? date : toLocalDateKey(date)
-  return tasks.filter((task) => task.plannedDate === dateKey)
+  return expandTasksForDate(tasks, date)
 }
 
 export function getPriorityDots(tasks) {

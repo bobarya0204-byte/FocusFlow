@@ -3,6 +3,10 @@ import { useEscapeKey } from '../../hooks/useEscapeKey'
 import { useFocusTrap } from '../../hooks/useFocusTrap'
 import { UNCATEGORIZED_PROJECT_ID } from '../../utils/projects'
 import { hasDuplicateTaskTitle, normalizePriority } from '../../utils/tasks'
+import {
+  RECURRENCE_FREQUENCIES,
+  formatRecurrenceLabel,
+} from '../../utils/recurrence'
 
 function TaskModal({
   task = null,
@@ -31,6 +35,12 @@ function TaskModal({
       task?.projectId ?? defaults.projectId ?? UNCATEGORIZED_PROJECT_ID,
   )
   const [showDuplicateWarning, setShowDuplicateWarning] = useState(false)
+  const [recurrenceFrequency, setRecurrenceFrequency] = useState('none')
+  const [recurrenceInterval, setRecurrenceInterval] = useState(1)
+  const [recurrenceStartDate, setRecurrenceStartDate] = useState(
+    () => task?.plannedDate ?? defaults.plannedDate ?? '',
+  )
+  const [recurrenceEndDate, setRecurrenceEndDate] = useState('')
 
   const activeProjects = projects.filter((project) => !project.archived)
   const currentProject = projects.find((project) => project.id === projectId)
@@ -68,6 +78,16 @@ function TaskModal({
       dueDate: dueDate || null,
       plannedDate,
       projectId,
+      recurrence:
+        recurrenceFrequency === 'none'
+          ? null
+          : {
+              frequency: recurrenceFrequency,
+              interval: Math.max(1, Number(recurrenceInterval) || 1),
+              startDate:
+                recurrenceStartDate || plannedDate || dueDate || null,
+              endDate: recurrenceEndDate || null,
+            },
     })
   }
 
@@ -214,6 +234,88 @@ function TaskModal({
                 deadline.
               </span>
             </label>
+
+            {!isEditing && (
+              <>
+                <div className="modal-field-row">
+                  <label className="modal-field">
+                    <span className="modal-label">Repeat</span>
+                    <select
+                      className="modal-select"
+                      value={recurrenceFrequency}
+                      onChange={(event) =>
+                        setRecurrenceFrequency(event.target.value)
+                      }
+                    >
+                      {RECURRENCE_FREQUENCIES.map((frequency) => (
+                        <option key={frequency} value={frequency}>
+                          {frequency === 'none'
+                            ? 'Does not repeat'
+                            : frequency === 'custom'
+                              ? 'Custom (every N days)'
+                              : frequency === 'weekdays'
+                                ? 'Weekdays (Mon–Fri)'
+                                : frequency.charAt(0).toUpperCase() +
+                                  frequency.slice(1)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {recurrenceFrequency !== 'none' &&
+                    recurrenceFrequency !== 'weekdays' && (
+                      <label className="modal-field">
+                        <span className="modal-label">Every</span>
+                        <input
+                          type="number"
+                          min="1"
+                          className="modal-input"
+                          value={recurrenceInterval}
+                          onChange={(event) =>
+                            setRecurrenceInterval(event.target.value)
+                          }
+                        />
+                      </label>
+                    )}
+                </div>
+                {recurrenceFrequency !== 'none' && (
+                  <>
+                    <div className="modal-field-row">
+                      <label className="modal-field">
+                        <span className="modal-label">Series start</span>
+                        <input
+                          type="date"
+                          className="modal-input"
+                          value={recurrenceStartDate || plannedDate}
+                          onChange={(event) =>
+                            setRecurrenceStartDate(event.target.value)
+                          }
+                          required
+                        />
+                      </label>
+                      <label className="modal-field">
+                        <span className="modal-label">Series end</span>
+                        <input
+                          type="date"
+                          className="modal-input"
+                          value={recurrenceEndDate}
+                          onChange={(event) =>
+                            setRecurrenceEndDate(event.target.value)
+                          }
+                        />
+                      </label>
+                    </div>
+                    <p className="modal-hint">
+                      {formatRecurrenceLabel({
+                        frequency: recurrenceFrequency,
+                        interval: Number(recurrenceInterval) || 1,
+                      })}
+                      . The Planner expands this series across every matching
+                      date in the range.
+                    </p>
+                  </>
+                )}
+              </>
+            )}
 
             <div className="modal-actions">
               <button

@@ -7,6 +7,9 @@ import {
   useRef,
   useState,
 } from 'react'
+import { useTasksState } from '../hooks/useTasksState'
+import { useFocusSessionsState } from '../hooks/useFocusSessionsState'
+import { useProjectsState } from '../hooks/useProjectsState'
 import { useRepositoryState } from '../hooks/useRepositoryState'
 import { useAuth } from '../auth'
 import { getRepository } from '../services/repositories/RepositoryFactory'
@@ -51,16 +54,38 @@ import {
   normalizeTaskStatus,
   reconcileTaskProjects,
 } from '../utils/tasks'
+import { getTodayLocalDate } from '../utils/dates'
 import {
-  buildNextRecurringInstance,
-  ensureOpenRecurringInstances,
+  isMasterRecurringTask,
+  isRecurrenceDate,
   normalizeRecurrence,
 } from '../utils/recurrence'
+import {
+  completeOccurrence,
+  isOccurrenceCompleted,
+  normalizeRecurrenceState,
+  uncompleteOccurrence,
+} from '../utils/recurrenceState'
+import {
+  SERIES_SCOPES,
+  applySeriesDelete,
+  applySeriesEdit,
+  applySeriesReschedule,
+} from '../utils/recurrenceSeries'
+import {
+  buildVirtualOccurrence,
+  parseVirtualOccurrenceId,
+} from '../utils/virtualTasks'
 import {
   STORAGE_ERROR_EVENT,
   consumePendingStorageErrors,
 } from '../utils/storage'
 import { TOAST_TYPES, createToast } from '../utils/toasts'
+import {
+  applyThemeToDocument,
+  getInitialTheme,
+  normalizeTheme,
+} from '../utils/theme'
 
 const FocusFlowContext = createContext(null)
 const PROJECT_MENU_SELECTORS = ['.project-menu']
@@ -77,19 +102,13 @@ export function FocusFlowProvider({ children }) {
     [user, authenticationMode],
   )
 
-  const [projects, setProjects] = useRepositoryState(
+  const [projects, setProjects] = useProjectsState(
     repository,
-    REPOSITORY_KEYS.PROJECTS,
     getInitialProjects,
   )
-  const [tasks, setTasks] = useRepositoryState(
+  const [tasks, setTasks] = useTasksState(repository, createInitialTasks)
+  const [focusSessions, setFocusSessions] = useFocusSessionsState(
     repository,
-    REPOSITORY_KEYS.TASKS,
-    createInitialTasks,
-  )
-  const [focusSessions, setFocusSessions] = useRepositoryState(
-    repository,
-    REPOSITORY_KEYS.FOCUS_SESSIONS,
     getInitialFocusSessions,
   )
 
@@ -115,11 +134,25 @@ export function FocusFlowProvider({ children }) {
     REPOSITORY_KEYS.SIDEBAR_COLLAPSED,
     getInitialSidebarCollapsed,
   )
+  const [theme, setThemeState] = useRepositoryState(
+    repository,
+    REPOSITORY_KEYS.THEME,
+    getInitialTheme,
+  )
+  useEffect(() => {
+    applyThemeToDocument(theme)
+  }, [theme])
+
+  const setTheme = useCallback((nextTheme) => {
+    setThemeState(normalizeTheme(nextTheme))
+  }, [setThemeState])
+
   const [projectMenuOpenId, setProjectMenuOpenId] = useState(null)
   const [taskModal, setTaskModal] = useState(null)
   const [taskDetailId, setTaskDetailId] = useState(null)
   const [projectModal, setProjectModal] = useState(null)
   const [archivedGuardProject, setArchivedGuardProject] = useState(null)
+  const [searchOpen, setSearchOpen] = useState(false)
   const [toasts, setToasts] = useState([])
   const toastTimersRef = useRef(new Map())
   const collectionsRef = useRef({ tasks, projects })
@@ -130,6 +163,18 @@ export function FocusFlowProvider({ children }) {
     if (taskDetailId == null) {
       return null
     }
+
+    const parsed = parseVirtualOccurrenceId(taskDetailId)
+    if (parsed) {
+      const master = liveTasks.find((task) =>
+        compareTaskIds(task.id, parsed.masterId),
+      )
+      if (!master) {
+        return null
+      }
+      return buildVirtualOccurrence(master, parsed.dateKey)
+    }
+
     return (
       liveTasks.find((task) => compareTaskIds(task.id, taskDetailId)) || null
     )
@@ -157,24 +202,15 @@ export function FocusFlowProvider({ children }) {
     [setProjects, setTasks],
   )
 
-  // Silent purge + ensure recurring series have an open next instance
+  // Silent purge on startup
   useEffect(() => {
     const purged = purgeExpiredDeleted(tasks, projects)
-    let nextTasks = purged.didChange ? purged.tasks : tasks
-    let nextProjects = purged.didChange ? purged.projects : projects
-    const withRecurring = ensureOpenRecurringInstances(nextTasks)
-    const didRecurringChange = withRecurring !== nextTasks
-    nextTasks = withRecurring
-
-    if (!purged.didChange && !didRecurringChange) {
+    if (!purged.didChange) {
       return
     }
-    collectionsRef.current = { tasks: nextTasks, projects: nextProjects }
-    setTasks(nextTasks)
-    if (purged.didChange) {
-      setProjects(nextProjects)
-    }
-    // Run once on startup with the hydrated localStorage snapshot
+    collectionsRef.current = { tasks: purged.tasks, projects: purged.projects }
+    setTasks(purged.tasks)
+    setProjects(purged.projects)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -449,6 +485,15 @@ export function FocusFlowProvider({ children }) {
     setTaskDetailId(null)
   }, [])
 
+  const openSearch = useCallback(() => {
+    setProjectMenuOpenId(null)
+    setSearchOpen(true)
+  }, [])
+
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false)
+  }, [])
+
   const saveTask = useCallback(
     ({
       id,
@@ -462,6 +507,7 @@ export function FocusFlowProvider({ children }) {
       status,
       estimatedMinutes = null,
       recurrence = undefined,
+      seriesScope = SERIES_SCOPES.OCCURRENCE,
     }) => {
       const now = new Date().toISOString()
       const nextProjectId = resolveProjectId(
@@ -481,71 +527,136 @@ export function FocusFlowProvider({ children }) {
       const nextEstimated = normalizeEstimatedMinutes(estimatedMinutes)
 
       if (id != null) {
+        const parsed = parseVirtualOccurrenceId(id)
+        const masterId = parsed?.masterId ?? id
+        const occurrenceDate = parsed?.dateKey ?? null
+
         updateCollections((currentTasks, currentProjects) => {
-          let spawned = null
-          const tasks = currentTasks.map((task) => {
-            if (!compareTaskIds(task.id, id)) {
-              return task
-            }
-
-            const nextStatus = normalizeTaskStatus(
-              status ?? task.status,
-              status === 'Completed' ||
-                (status == null && task.completed),
-            )
-            const completed = nextStatus === 'Completed'
-            const wasCompleted = task.completed
-            const nextRecurrence =
-              recurrence === undefined
-                ? task.recurrence
-                : normalizeRecurrence(recurrence)
-
-            const updated = {
-              ...task,
-              title,
-              description:
-                typeof description === 'string'
-                  ? description
-                  : task.description || '',
-              notes: typeof notes === 'string' ? notes : task.notes || '',
-              priority: nextPriority,
-              status: nextStatus,
-              completed,
-              completedAt: completed
-                ? task.completedAt || now
-                : null,
-              dueDate: nextDueDate,
-              plannedDate: nextPlannedDate,
-              estimatedMinutes: nextEstimated,
-              projectId: nextProjectId,
-              updatedAt: now,
-              recurrence: nextRecurrence,
-              seriesId:
-                nextRecurrence && !task.seriesId ? task.id : task.seriesId,
-            }
-
-            if (completed && !wasCompleted && nextRecurrence) {
-              spawned = buildNextRecurringInstance(updated, now)
-            }
-
-            return updated
-          })
-
-          return {
-            tasks: spawned ? [...tasks, spawned] : tasks,
-            projects: currentProjects,
+          const existing = currentTasks.find((task) =>
+            compareTaskIds(task.id, masterId),
+          )
+          if (!existing) {
+            return { tasks: currentTasks, projects: currentProjects }
           }
+
+          const nextRecurrence =
+            recurrence === undefined
+              ? existing.recurrence
+              : normalizeRecurrence(recurrence)
+          const nextStatus = normalizeTaskStatus(
+            status ?? existing.status,
+            status === 'Completed' || (status == null && existing.completed),
+          )
+          const completed = nextStatus === 'Completed'
+
+          const patch = {
+            title,
+            description:
+              typeof description === 'string'
+                ? description
+                : existing.description || '',
+            notes: typeof notes === 'string' ? notes : existing.notes || '',
+            priority: nextPriority,
+            dueDate: nextDueDate,
+            plannedDate: nextPlannedDate,
+            estimatedMinutes: nextEstimated,
+            projectId: nextProjectId,
+            recurrence: nextRecurrence,
+          }
+
+          let tasks = currentTasks
+
+          if (isMasterRecurringTask(existing)) {
+            const recurrenceChanged =
+              JSON.stringify(normalizeRecurrence(existing.recurrence)) !==
+              JSON.stringify(nextRecurrence)
+            const editScope =
+              recurrenceChanged && seriesScope === SERIES_SCOPES.OCCURRENCE
+                ? SERIES_SCOPES.SERIES
+                : seriesScope
+
+            tasks = applySeriesEdit(
+              tasks,
+              parsed ? id : masterId,
+              occurrenceDate,
+              patch,
+              editScope,
+              now,
+            )
+
+            if (occurrenceDate) {
+              tasks = tasks.map((task) => {
+                if (!compareTaskIds(task.id, masterId)) {
+                  return task
+                }
+                const state = normalizeRecurrenceState(task.recurrenceState)
+                const wasCompleted = isOccurrenceCompleted(state, occurrenceDate)
+                if (completed === wasCompleted) {
+                  return task
+                }
+                return {
+                  ...task,
+                  recurrenceState: completed
+                    ? completeOccurrence(state, occurrenceDate, now)
+                    : uncompleteOccurrence(state, occurrenceDate),
+                  updatedAt: now,
+                }
+              })
+            }
+          } else if (nextRecurrence) {
+            tasks = currentTasks.map((task) =>
+              compareTaskIds(task.id, id)
+                ? {
+                    ...task,
+                    ...patch,
+                    recurrence: nextRecurrence,
+                    recurrenceState: normalizeRecurrenceState(
+                      task.recurrenceState,
+                    ),
+                    plannedDate: null,
+                    completed: false,
+                    completedAt: null,
+                    status: 'Open',
+                    updatedAt: now,
+                  }
+                : task,
+            )
+          } else {
+            tasks = currentTasks.map((task) =>
+              compareTaskIds(task.id, id)
+                ? {
+                    ...task,
+                    ...patch,
+                    status: nextStatus,
+                    completed,
+                    completedAt: completed ? task.completedAt || now : null,
+                    updatedAt: now,
+                  }
+                : task,
+            )
+          }
+
+          return { tasks, projects: currentProjects }
         })
         showToast({ message: 'Task Updated', type: TOAST_TYPES.SUCCESS })
         setTaskDetailId(null)
       } else {
         const nextStatus = normalizeTaskStatus(status, status === 'Completed')
         const nextRecurrence = normalizeRecurrence(recurrence)
+        const startDate =
+          nextRecurrence?.startDate ||
+          nextPlannedDate ||
+          nextDueDate ||
+          getTodayLocalDate()
+        const recurrenceWithStart = nextRecurrence
+          ? { ...nextRecurrence, startDate }
+          : null
+        const newTaskId = createTaskId()
         updateCollections((currentTasks, currentProjects) => ({
           tasks: [
             ...currentTasks,
             {
-              id: createTaskId(),
+              id: newTaskId,
               title,
               description: typeof description === 'string' ? description : '',
               notes: typeof notes === 'string' ? notes : '',
@@ -554,16 +665,17 @@ export function FocusFlowProvider({ children }) {
               completed: nextStatus === 'Completed',
               completedAt: nextStatus === 'Completed' ? now : null,
               dueDate: nextDueDate,
-              plannedDate: nextPlannedDate,
+              plannedDate: recurrenceWithStart ? null : nextPlannedDate,
               estimatedMinutes: nextEstimated,
               createdAt: now,
               updatedAt: now,
               projectId: nextProjectId,
               deleted: false,
               deletedAt: null,
-              recurrence: nextRecurrence,
+              recurrence: recurrenceWithStart,
+              recurrenceState: normalizeRecurrenceState(null),
               seriesId: null,
-              occurrenceDate: nextPlannedDate || nextDueDate || null,
+              occurrenceDate: null,
             },
           ],
           projects: currentProjects,
@@ -613,6 +725,7 @@ export function FocusFlowProvider({ children }) {
             deleted: false,
             deletedAt: null,
             recurrence: null,
+            recurrenceState: normalizeRecurrenceState(null),
             seriesId: null,
             occurrenceDate: null,
           })),
@@ -661,9 +774,18 @@ export function FocusFlowProvider({ children }) {
   )
 
   const deleteTask = useCallback(
-    (taskId) => {
+    (taskId, { seriesScope = SERIES_SCOPES.OCCURRENCE } = {}) => {
+      const parsed = parseVirtualOccurrenceId(taskId)
+      const occurrenceDate = parsed?.dateKey ?? null
       updateCollections((currentTasks, currentProjects) => ({
-        tasks: softDeleteTask(currentTasks, taskId),
+        tasks: applySeriesDelete(
+          currentTasks,
+          taskId,
+          occurrenceDate,
+          seriesScope,
+          new Date().toISOString(),
+          softDeleteTask,
+        ),
         projects: currentProjects,
       }))
       setTaskDetailId((current) =>
@@ -704,26 +826,70 @@ export function FocusFlowProvider({ children }) {
   const toggleTaskCompleted = useCallback(
     (taskId) => {
       updateCollections((currentTasks, currentProjects) => {
-        let spawned = null
+        const updatedAt = new Date().toISOString()
+        const parsed = parseVirtualOccurrenceId(taskId)
+
+        if (parsed) {
+          const tasks = currentTasks.map((task) => {
+            if (!compareTaskIds(task.id, parsed.masterId) || isDeleted(task)) {
+              return task
+            }
+            const state = normalizeRecurrenceState(task.recurrenceState)
+            const completed = !isOccurrenceCompleted(state, parsed.dateKey)
+            return {
+              ...task,
+              recurrenceState: completed
+                ? completeOccurrence(state, parsed.dateKey, updatedAt)
+                : uncompleteOccurrence(state, parsed.dateKey),
+              updatedAt,
+            }
+          })
+          return { tasks, projects: currentProjects }
+        }
+
+        const target = currentTasks.find((task) => compareTaskIds(task.id, taskId))
+        if (!target || isDeleted(target)) {
+          return { tasks: currentTasks, projects: currentProjects }
+        }
+
+        if (isMasterRecurringTask(target)) {
+          const today = getTodayLocalDate()
+          const recurrence = normalizeRecurrence(target.recurrence)
+          if (!recurrence || !isRecurrenceDate(recurrence, today)) {
+            return { tasks: currentTasks, projects: currentProjects }
+          }
+
+          const tasks = currentTasks.map((task) => {
+            if (!compareTaskIds(task.id, taskId)) {
+              return task
+            }
+            const state = normalizeRecurrenceState(task.recurrenceState)
+            const completed = !isOccurrenceCompleted(state, today)
+            return {
+              ...task,
+              recurrenceState: completed
+                ? completeOccurrence(state, today, updatedAt)
+                : uncompleteOccurrence(state, today),
+              updatedAt,
+            }
+          })
+          return { tasks, projects: currentProjects }
+        }
+
         const tasks = currentTasks.map((task) => {
           if (!compareTaskIds(task.id, taskId) || isDeleted(task)) {
             return task
           }
 
           const completed = !task.completed
-          const updatedAt = new Date().toISOString()
           if (completed) {
-            const updated = {
+            return {
               ...task,
               completed: true,
               status: 'Completed',
               completedAt: updatedAt,
               updatedAt,
             }
-            if (task.recurrence) {
-              spawned = buildNextRecurringInstance(updated, updatedAt)
-            }
-            return updated
           }
 
           const { completedAt, ...rest } = task
@@ -735,10 +901,7 @@ export function FocusFlowProvider({ children }) {
           }
         })
 
-        return {
-          tasks: spawned ? [...tasks, spawned] : tasks,
-          projects: currentProjects,
-        }
+        return { tasks, projects: currentProjects }
       })
     },
     [updateCollections],
@@ -747,19 +910,58 @@ export function FocusFlowProvider({ children }) {
   const planTask = useCallback(
     (taskId, plannedDate) => {
       updateCollections((currentTasks, currentProjects) => ({
-        tasks: currentTasks.map((task) =>
-          compareTaskIds(task.id, taskId) && isLive(task)
-            ? {
-                ...task,
-                plannedDate: plannedDate || null,
-                updatedAt: new Date().toISOString(),
-              }
-            : task,
-        ),
+        tasks: currentTasks.map((task) => {
+          if (!compareTaskIds(task.id, taskId) || isDeleted(task)) {
+            return task
+          }
+
+          if (isMasterRecurringTask(task)) {
+            const recurrence = normalizeRecurrence(task.recurrence)
+            return {
+              ...task,
+              recurrence: recurrence
+                ? {
+                    ...recurrence,
+                    startDate: plannedDate || recurrence.startDate,
+                  }
+                : recurrence,
+              updatedAt: new Date().toISOString(),
+            }
+          }
+
+          return {
+            ...task,
+            plannedDate: plannedDate || null,
+            updatedAt: new Date().toISOString(),
+          }
+        }),
         projects: currentProjects,
       }))
     },
     [updateCollections],
+  )
+
+  const rescheduleRecurringTask = useCallback(
+    (taskId, fromDateKey, toDateKey, scope = SERIES_SCOPES.OCCURRENCE) => {
+      if (!fromDateKey || !toDateKey || fromDateKey === toDateKey) {
+        return
+      }
+
+      const now = new Date().toISOString()
+      updateCollections((currentTasks, currentProjects) => ({
+        tasks: applySeriesReschedule(
+          currentTasks,
+          taskId,
+          fromDateKey,
+          toDateKey,
+          scope,
+          now,
+        ),
+        projects: currentProjects,
+      }))
+      showToast({ message: 'Task rescheduled', type: TOAST_TYPES.SUCCESS })
+    },
+    [showToast, updateCollections],
   )
 
   const openCreateProject = useCallback(() => {
@@ -1048,11 +1250,16 @@ export function FocusFlowProvider({ children }) {
       projectMenuOpenId,
       isSidebarCollapsed,
       setIsSidebarCollapsed,
+      theme,
+      setTheme,
       taskModal,
       taskDetailId,
       taskDetailTask,
       projectModal,
       archivedGuardProject,
+      searchOpen,
+      openSearch,
+      closeSearch,
       showArchivedGuard,
       dismissArchivedGuard,
       restoreArchivedGuardProject,
@@ -1077,6 +1284,7 @@ export function FocusFlowProvider({ children }) {
       permanentlyDeleteSelected,
       toggleTaskCompleted,
       planTask,
+      rescheduleRecurringTask,
       openCreateProject,
       openEditProject,
       closeProjectModal,
@@ -1100,11 +1308,16 @@ export function FocusFlowProvider({ children }) {
       projectFilter,
       projectMenuOpenId,
       isSidebarCollapsed,
+      theme,
+      setTheme,
       taskModal,
       taskDetailId,
       taskDetailTask,
       projectModal,
       archivedGuardProject,
+      searchOpen,
+      openSearch,
+      closeSearch,
       showArchivedGuard,
       dismissArchivedGuard,
       restoreArchivedGuardProject,
@@ -1128,6 +1341,7 @@ export function FocusFlowProvider({ children }) {
       permanentlyDeleteSelected,
       toggleTaskCompleted,
       planTask,
+      rescheduleRecurringTask,
       openCreateProject,
       openEditProject,
       closeProjectModal,

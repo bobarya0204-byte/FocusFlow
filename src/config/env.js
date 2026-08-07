@@ -82,8 +82,14 @@ export const appEnv = {
     'VITE_AZURE_REDIRECT_URI',
   ]),
 
-  /** Reserved for future API / sync backend */
-  apiBaseUrl: readEnv('VITE_API_BASE_URL', ''),
+  /** FocusFlow REST API base URL (includes /api suffix) */
+  apiBaseUrl: readEnv('VITE_API_BASE_URL', 'http://localhost:3001/api'),
+
+  /** Custom Entra API scope (defaults to api://{clientId}/access_as_user) */
+  azureApiScope: readEnv('VITE_AZURE_API_SCOPE', ''),
+
+  /** api | local — defaults to api (Sprint 4.4) */
+  repositoryMode: readEnv('VITE_REPOSITORY_MODE', 'api'),
 }
 
 /**
@@ -105,6 +111,22 @@ export function getAzureAuthority() {
 /** True when minimum Entra registration values are present in the environment. */
 export function isAzureAuthConfigured() {
   return Boolean(appEnv.azureClientId && getAzureAuthority())
+}
+
+/**
+ * Scopes requested when acquiring an access token for the FocusFlow API.
+ * @returns {string[]}
+ */
+export function getAzureApiScopes() {
+  if (appEnv.azureApiScope) {
+    return appEnv.azureApiScope.split(/[\s,]+/).filter(Boolean)
+  }
+
+  if (appEnv.azureClientId) {
+    return [`api://${appEnv.azureClientId}/access_as_user`]
+  }
+
+  return []
 }
 
 /**

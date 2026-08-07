@@ -6,6 +6,7 @@ import {
 } from '../../utils/navigation.js'
 import { PROJECTS_STORAGE_KEY } from '../../utils/projects.js'
 import { TASKS_STORAGE_KEY } from '../../utils/tasks.js'
+import { THEME_KEY } from '../../utils/theme.js'
 
 /**
  * Canonical persistence keys — unchanged from pre-repository storage.
@@ -18,6 +19,7 @@ export const REPOSITORY_KEYS = {
   ACTIVE_PAGE: ACTIVE_PAGE_KEY,
   SIDEBAR_COLLAPSED: SIDEBAR_COLLAPSED_KEY,
   PROJECT_FILTER: PROJECT_FILTER_KEY,
+  THEME: THEME_KEY,
 }
 
 /**

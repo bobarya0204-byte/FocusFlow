@@ -1,18 +1,17 @@
 import { fromLocalDateKey, toLocalDateKey } from './dates'
 import { addDays } from './planner'
 
-function createOccurrenceId() {
-  return `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-}
-
 export const RECURRENCE_FREQUENCIES = [
   'none',
   'daily',
+  'weekdays',
   'weekly',
   'monthly',
   'yearly',
   'custom',
 ]
+
+const MAX_EXPAND_PER_RANGE = 400
 
 export function normalizeRecurrence(raw) {
   if (!raw || typeof raw !== 'object' || raw.frequency === 'none' || !raw.frequency) {
@@ -27,17 +26,20 @@ export function normalizeRecurrence(raw) {
   }
 
   const interval = Math.max(1, Math.floor(Number(raw.interval) || 1))
+  const startDate =
+    typeof raw.startDate === 'string' && raw.startDate ? raw.startDate : null
   const endDate =
     typeof raw.endDate === 'string' && raw.endDate ? raw.endDate : null
+  const byWeekday = Array.isArray(raw.byWeekday)
+    ? raw.byWeekday.filter((day) => day >= 0 && day <= 6)
+    : null
 
   return {
     frequency,
     interval,
+    startDate,
     endDate,
-    // Custom: repeat every N days (interval already covers this)
-    byWeekday: Array.isArray(raw.byWeekday)
-      ? raw.byWeekday.filter((day) => day >= 0 && day <= 6)
-      : null,
+    byWeekday,
   }
 }
 
@@ -50,6 +52,8 @@ export function formatRecurrenceLabel(recurrence) {
   switch (recurrence.frequency) {
     case 'daily':
       return n === 1 ? 'Daily' : `Every ${n} days`
+    case 'weekdays':
+      return 'Weekdays (Mon–Fri)'
     case 'weekly':
       return n === 1 ? 'Weekly' : `Every ${n} weeks`
     case 'monthly':
@@ -63,11 +67,17 @@ export function formatRecurrenceLabel(recurrence) {
   }
 }
 
+/**
+ * @param {Record<string, unknown>} task
+ */
+export function isMasterRecurringTask(task) {
+  return Boolean(task && !task.deleted && normalizeRecurrence(task.recurrence))
+}
+
 function addMonths(date, amount) {
   const next = new Date(date)
   const day = next.getDate()
   next.setMonth(next.getMonth() + amount)
-  // Clamp overflow (e.g. Jan 31 + 1 month)
   if (next.getDate() < day) {
     next.setDate(0)
   }
@@ -80,7 +90,24 @@ function addYears(date, amount) {
   return next
 }
 
-/** Compute the next occurrence date key after `fromDateKey`. */
+function isWeekday(date) {
+  const day = date.getDay()
+  return day >= 1 && day <= 5
+}
+
+function nextWeekday(from) {
+  let next = addDays(from, 1)
+  while (!isWeekday(next)) {
+    next = addDays(next, 1)
+  }
+  return next
+}
+
+function minDateKey(a, b) {
+  return a <= b ? a : b
+}
+
+/** Compute the next occurrence date key strictly after `fromDateKey`. */
 export function getNextOccurrenceDateKey(recurrence, fromDateKey) {
   if (!recurrence || !fromDateKey) {
     return null
@@ -92,6 +119,11 @@ export function getNextOccurrenceDateKey(recurrence, fromDateKey) {
 
   switch (recurrence.frequency) {
     case 'daily':
+      next = addDays(from, interval)
+      break
+    case 'weekdays':
+      next = nextWeekday(from)
+      break
     case 'custom':
       next = addDays(from, interval)
       break
@@ -116,110 +148,177 @@ export function getNextOccurrenceDateKey(recurrence, fromDateKey) {
 }
 
 /**
- * When a recurring task is completed, create the next open instance.
- * Completed history is preserved; the new task shares seriesId.
+ * Expand occurrence date keys within a visible planner range.
+ * Does not materialize task rows — used for rendering only.
+ *
+ * @param {ReturnType<typeof normalizeRecurrence>} recurrence
+ * @param {string} rangeStart
+ * @param {string} rangeEnd
+ * @param {number} [maxCount]
  */
-export function buildNextRecurringInstance(task, completedAtIso = new Date().toISOString()) {
-  const recurrence = normalizeRecurrence(task.recurrence)
-  if (!recurrence) {
-    return null
+export function expandOccurrenceDatesInRange(
+  recurrence,
+  rangeStart,
+  rangeEnd,
+  maxCount = MAX_EXPAND_PER_RANGE,
+) {
+  if (!recurrence?.startDate) {
+    return []
   }
 
-  const anchor =
-    task.plannedDate ||
-    task.dueDate ||
-    toLocalDateKey(new Date(completedAtIso))
+  const seriesEnd = recurrence.endDate
+    ? minDateKey(recurrence.endDate, rangeEnd)
+    : rangeEnd
 
-  const nextDate = getNextOccurrenceDateKey(recurrence, anchor)
-  if (!nextDate) {
-    return null
+  if (recurrence.startDate > seriesEnd) {
+    return []
   }
 
-  const seriesId = task.seriesId || task.id
-  const now = completedAtIso
+  const dates = []
+  let current = recurrence.startDate
 
-  return {
-    id: createOccurrenceId(),
-    title: task.title,
-    description: task.description || '',
-    notes: task.notes || '',
-    priority: task.priority,
-    status: 'Open',
-    completed: false,
-    completedAt: null,
-    dueDate: task.dueDate ? nextDate : null,
-    plannedDate: task.plannedDate ? nextDate : task.dueDate ? null : nextDate,
-    estimatedMinutes: task.estimatedMinutes ?? null,
-    createdAt: now,
-    updatedAt: now,
-    projectId: task.projectId,
-    deleted: false,
-    deletedAt: null,
-    recurrence,
-    seriesId,
-    occurrenceDate: nextDate,
+  while (current < rangeStart) {
+    const next = getNextOccurrenceDateKey(recurrence, current)
+    if (!next || next <= current) {
+      return dates
+    }
+    current = next
   }
+
+  while (current <= seriesEnd && dates.length < maxCount) {
+    if (current >= rangeStart) {
+      dates.push(current)
+    }
+    const next = getNextOccurrenceDateKey(recurrence, current)
+    if (!next || next <= current) {
+      break
+    }
+    current = next
+  }
+
+  return dates
 }
 
 /**
- * Ensure open recurring tasks have a planned/due date for the near horizon.
- * Does not duplicate completed history — only fills missing next open instance
- * when the series has no open task ahead.
+ * @param {ReturnType<typeof normalizeRecurrence>} recurrence
+ * @param {string} dateKey
  */
-export function ensureOpenRecurringInstances(tasks, todayKey = toLocalDateKey()) {
+export function isRecurrenceDate(recurrence, dateKey) {
+  if (!recurrence?.startDate || dateKey < recurrence.startDate) {
+    return false
+  }
+  if (recurrence.endDate && dateKey > recurrence.endDate) {
+    return false
+  }
+  return expandOccurrenceDatesInRange(recurrence, dateKey, dateKey, 1).includes(
+    dateKey,
+  )
+}
+
+/**
+ * Consolidate legacy spawned occurrence rows into a single master task.
+ *
+ * @param {Record<string, unknown>[]} tasks
+ */
+export function migrateLegacyRecurringTasks(tasks) {
   if (!Array.isArray(tasks)) {
+    return []
+  }
+
+  const removeIds = new Set()
+  /** @type {Map<string, Record<string, unknown>>} */
+  const masterUpdates = new Map()
+
+  const seriesGroups = new Map()
+  for (const task of tasks) {
+    if (task.deleted || !task.seriesId || task.seriesId === task.id) {
+      continue
+    }
+    const key = String(task.seriesId)
+    if (!seriesGroups.has(key)) {
+      seriesGroups.set(key, [])
+    }
+    seriesGroups.get(key).push(task)
+  }
+
+  for (const [seriesId, children] of seriesGroups) {
+    const master =
+      tasks.find((task) => String(task.id) === seriesId) ||
+      children.find((task) => task.recurrence) ||
+      children[0]
+    if (!master) {
+      continue
+    }
+
+    let recurrence = normalizeRecurrence(master.recurrence)
+    if (!recurrence && children[0]?.recurrence) {
+      recurrence = normalizeRecurrence(children[0].recurrence)
+    }
+
+    const completed = []
+    const deleted = []
+    let startDate = recurrence?.startDate ?? null
+    let endDate = recurrence?.endDate ?? null
+
+    const allRows = [master, ...children.filter((child) => child.id !== master.id)]
+    for (const row of allRows) {
+      if (row.id !== master.id) {
+        removeIds.add(String(row.id))
+      }
+
+      const dateKey =
+        row.occurrenceDate || row.plannedDate || row.dueDate || null
+      if (dateKey) {
+        if (!startDate || dateKey < startDate) {
+          startDate = dateKey
+        }
+        if (!endDate || dateKey > endDate) {
+          endDate = dateKey
+        }
+      }
+
+      if (row.completed && dateKey) {
+        completed.push({
+          date: dateKey,
+          completedAt:
+            row.completedAt || row.updatedAt || new Date().toISOString(),
+        })
+      }
+    }
+
+    if (!recurrence) {
+      continue
+    }
+
+    masterUpdates.set(String(master.id), {
+      ...master,
+      recurrence: {
+        ...recurrence,
+        startDate: recurrence.startDate || startDate,
+        endDate: recurrence.endDate || endDate,
+      },
+      recurrenceState: {
+        completed,
+        deleted,
+        cancelledFrom: null,
+        exceptions: {},
+        futureFrom: null,
+        movedOccurrences: [],
+      },
+      completed: false,
+      completedAt: null,
+      status: 'Open',
+      seriesId: null,
+      occurrenceDate: null,
+      plannedDate: null,
+    })
+  }
+
+  if (removeIds.size === 0 && masterUpdates.size === 0) {
     return tasks
   }
 
-  const openSeries = new Set()
-  tasks.forEach((task) => {
-    if (task.deleted || task.completed) {
-      return
-    }
-    if (task.seriesId || task.recurrence) {
-      openSeries.add(task.seriesId || task.id)
-    }
-  })
-
-  const additions = []
-  tasks.forEach((task) => {
-    if (task.deleted || !task.completed || !task.recurrence) {
-      return
-    }
-    const seriesId = task.seriesId || task.id
-    if (openSeries.has(seriesId)) {
-      return
-    }
-
-    // Only spawn from the latest completed occurrence in the series
-    const siblings = tasks.filter(
-      (item) =>
-        !item.deleted &&
-        (item.seriesId || item.id) === seriesId &&
-        item.completed,
-    )
-    const latest = siblings.sort((a, b) =>
-      String(b.completedAt || b.updatedAt || '').localeCompare(
-        String(a.completedAt || a.updatedAt || ''),
-      ),
-    )[0]
-    if (!latest || latest.id !== task.id) {
-      return
-    }
-
-    const next = buildNextRecurringInstance(latest)
-    if (next) {
-      // Prefer planning into today/future, not the past
-      if (next.plannedDate && next.plannedDate < todayKey) {
-        next.plannedDate = todayKey
-      }
-      if (next.dueDate && next.dueDate < todayKey) {
-        next.dueDate = todayKey
-      }
-      additions.push(next)
-      openSeries.add(seriesId)
-    }
-  })
-
-  return additions.length === 0 ? tasks : [...tasks, ...additions]
+  return tasks
+    .filter((task) => !removeIds.has(String(task.id)))
+    .map((task) => masterUpdates.get(String(task.id)) ?? task)
 }

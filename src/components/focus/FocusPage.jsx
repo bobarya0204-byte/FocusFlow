@@ -24,6 +24,7 @@ import {
   getTimerRemainingSeconds,
 } from '../../utils/focusRuntime'
 import { getTodayLocalDate } from '../../utils/dates'
+import { expandTasksForDate } from '../../utils/virtualTasks'
 
 const PRESET_DURATIONS = [25, 45, 60]
 
@@ -67,10 +68,7 @@ function FocusPage() {
 
   const today = getTodayLocalDate()
   const openTasks = useMemo(
-    () =>
-      tasks.filter(
-        (task) => !task.completed && task.plannedDate === today,
-      ),
+    () => expandTasksForDate(tasks, today).filter((task) => !task.completed),
     [tasks, today],
   )
   const todayStats = useMemo(

@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import './App.css'
 import { useFocusFlow } from './context/FocusFlowContext'
 import Sidebar from './components/layout/Sidebar'
@@ -8,11 +9,13 @@ import AnalyticsPage from './components/analytics/AnalyticsPage'
 import PlannerPage from './components/Planner/PlannerPage'
 import DeletedItemsPage from './components/deleted/DeletedItemsPage'
 import AiInboxPage from './components/inbox/AiInboxPage'
+import SettingsPage from './components/settings/SettingsPage'
 import TaskModal from './components/tasks/TaskModal'
 import TaskDetailPanel from './components/tasks/TaskDetailPanel'
 import ProjectModal from './components/projects/ProjectModal'
 import Toast from './components/ui/Toast'
 import ArchivedProjectDialog from './components/projects/ArchivedProjectDialog'
+import UniversalSearch from './components/search/UniversalSearch'
 
 function App() {
   const {
@@ -39,7 +42,24 @@ function App() {
     deleteTask,
     closeProjectModal,
     saveProject,
+    searchOpen,
+    openSearch,
+    closeSearch,
+    openEditTask,
+    openProjectTasks,
   } = useFocusFlow()
+
+  useEffect(() => {
+    function onKeyDown(event) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        openSearch()
+      }
+    }
+
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [openSearch])
 
   return (
     <div className="app">
@@ -49,6 +69,7 @@ function App() {
         activePage={activePage}
         onNavigate={navigateTo}
         onAddTask={openCreateTask}
+        onOpenSearch={openSearch}
         deletedCount={deletedCount}
       />
 
@@ -58,6 +79,7 @@ function App() {
       {activePage === 'analytics' && <AnalyticsPage />}
       {activePage === 'planner' && <PlannerPage />}
       {activePage === 'inbox' && <AiInboxPage />}
+      {activePage === 'settings' && <SettingsPage />}
       {activePage === 'deleted' && <DeletedItemsPage />}
 
       {taskModal && (
@@ -74,6 +96,7 @@ function App() {
       {taskDetailTask && (
         <TaskDetailPanel
           task={taskDetailTask}
+          tasks={tasks}
           projects={projects}
           onClose={closeTaskDetail}
           onSave={saveTask}
@@ -97,6 +120,15 @@ function App() {
           onRestore={restoreArchivedGuardProject}
         />
       )}
+
+      <UniversalSearch
+        isOpen={searchOpen}
+        onClose={closeSearch}
+        tasks={tasks}
+        projects={projects}
+        onSelectTask={openEditTask}
+        onSelectProject={openProjectTasks}
+      />
 
       <Toast toasts={toasts} onUndo={undoToast} onDismiss={dismissToast} />
     </div>

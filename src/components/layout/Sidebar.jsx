@@ -7,8 +7,10 @@ import {
   Inbox,
   Trash2,
   Plus,
+  Settings,
   PanelLeftClose,
   PanelLeftOpen,
+  Search,
 } from 'lucide-react'
 
 function Sidebar({
@@ -17,6 +19,7 @@ function Sidebar({
   activePage,
   onNavigate,
   onAddTask,
+  onOpenSearch,
   deletedCount = 0,
 }) {
   return (
@@ -41,6 +44,17 @@ function Sidebar({
           </button>
         </div>
         <div className="sidebar-title-divider" aria-hidden="true" />
+        <button
+          type="button"
+          className="sidebar-search-trigger"
+          onClick={onOpenSearch}
+          title="Search (Ctrl+K)"
+          aria-label="Search tasks and projects"
+        >
+          <Search size={16} strokeWidth={1.75} aria-hidden="true" />
+          <span className="sidebar-search-label">Search…</span>
+          <kbd className="sidebar-search-kbd">Ctrl K</kbd>
+        </button>
       </div>
 
       <nav className="sidebar-nav">
@@ -111,6 +125,17 @@ function Sidebar({
           <span className="nav-label">AI Inbox</span>
         </button>
         <div className="sidebar-nav-divider" aria-hidden="true" />
+        <button
+          type="button"
+          className={`nav-item${activePage === 'settings' ? ' active' : ''}`}
+          title="Settings"
+          onClick={() => onNavigate('settings')}
+        >
+          <span className="nav-icon" aria-hidden="true">
+            <Settings size={18} strokeWidth={1.75} />
+          </span>
+          <span className="nav-label">Settings</span>
+        </button>
         <button
           type="button"
           className={`nav-item${activePage === 'deleted' ? ' active' : ''}`}

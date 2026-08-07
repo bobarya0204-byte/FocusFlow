@@ -8,6 +8,7 @@ import ProjectBadge from '../ui/ProjectBadge'
 import TaskCard from '../tasks/TaskCard'
 import { getTaskCounts } from '../../utils/tasks'
 import { getTodayLocalDate } from '../../utils/dates'
+import { expandTasksForDate } from '../../utils/virtualTasks'
 import {
   getActiveProjects,
   getProjectById,
@@ -37,7 +38,7 @@ function Dashboard() {
   const counts = useMemo(() => getTaskCounts(tasks), [tasks])
   const today = getTodayLocalDate()
   const todayTasks = useMemo(
-    () => tasks.filter((task) => task.plannedDate === today),
+    () => expandTasksForDate(tasks, today),
     [tasks, today],
   )
   const activeProjects = useMemo(

@@ -10,8 +10,10 @@ import {
   AUTHENTICATION_MODES,
   createLocalUser,
 } from './authTypes.js'
+import { authenticateBrowserMsal } from './msal/browserMsalAuth.js'
 import { initializeMsalSilently } from './msal/msalConfig.js'
 import {
+  isBrowserMsalMode,
   isTeamsSsoMode,
   resolveAuthenticationMode,
   resolvePlannedAuthenticationMode,
@@ -35,8 +37,7 @@ const INITIAL_AUTH_STATE = {
 
 /**
  * Identity provider for FocusFlow.
- * Step 3A: validates Entra configuration and initializes MSAL silently.
- * Active mode remains LOCAL until live auth is explicitly enabled.
+ * Step 3B: interactive MSAL login in BROWSER_MSAL mode.
  */
 export function AuthProvider({ children }) {
   const teams = useTeamsOptional()
@@ -57,22 +58,40 @@ export function AuthProvider({ children }) {
       })
       const isEntraConfigured = isAzureAuthConfigured()
       const validation = validateAzureConfig()
+
+      let user = createLocalUser(authenticationMode)
+      let isAuthenticated = authenticationMode === AUTHENTICATION_MODES.LOCAL
       let msalAccounts = []
       let isMsalReady = false
       let msalInitialized = false
 
       try {
-        if (isEntraConfigured && validation.isValid) {
+        if (
+          isBrowserMsalMode(authenticationMode) &&
+          isEntraConfigured &&
+          validation.isValid
+        ) {
+          const msalResult = await authenticateBrowserMsal()
+
+          if (msalResult.redirecting) {
+            return
+          }
+
+          if (msalResult.user) {
+            user = msalResult.user
+            isAuthenticated = true
+            msalAccounts = msalResult.accounts
+            isMsalReady = true
+            msalInitialized = true
+          }
+        } else if (isEntraConfigured && validation.isValid) {
           const msalResult = await initializeMsalSilently()
           msalAccounts = msalResult.accounts
           isMsalReady = Boolean(msalResult.instance)
           msalInitialized = isMsalReady
         }
 
-        if (
-          isEntraConfigured &&
-          isTeamsSsoMode(plannedAuthenticationMode)
-        ) {
+        if (isTeamsSsoMode(authenticationMode)) {
           await initializeTeamsSso()
           await acquireTeamsSsoToken()
         }
@@ -91,10 +110,10 @@ export function AuthProvider({ children }) {
       }
 
       setAuthState({
-        user: createLocalUser(authenticationMode),
+        user,
         authenticationMode,
         plannedAuthenticationMode,
-        isAuthenticated: authenticationMode === AUTHENTICATION_MODES.LOCAL,
+        isAuthenticated,
         isLoading: false,
         isEntraConfigured,
         isMsalReady,

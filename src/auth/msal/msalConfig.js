@@ -1,5 +1,10 @@
 import { LogLevel, PublicClientApplication } from '@azure/msal-browser'
-import { appEnv, getAzureAuthority, isAzureAuthConfigured } from '../../config/env.js'
+import {
+  appEnv,
+  getAzureApiScopes,
+  getAzureAuthority,
+  isAzureAuthConfigured,
+} from '../../config/env.js'
 
 /** @type {import('@azure/msal-browser').Configuration} */
 export function createMsalConfiguration() {
@@ -39,8 +44,14 @@ export function createMsalConfiguration() {
   }
 }
 
-/** Default OIDC scopes for future interactive sign-in (not requested in Step 2). */
+/** Default OIDC scopes for interactive sign-in. */
 export const DEFAULT_LOGIN_SCOPES = ['openid', 'profile', 'User.Read']
+
+/** Login + FocusFlow API scopes — requested together so API tokens are cached after sign-in. */
+export function getMsalAuthScopes() {
+  const apiScopes = getAzureApiScopes()
+  return [...new Set([...DEFAULT_LOGIN_SCOPES, ...apiScopes])]
+}
 
 export function isMsalEnabled() {
   return isAzureAuthConfigured()

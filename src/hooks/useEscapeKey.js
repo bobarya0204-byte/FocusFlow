@@ -9,6 +9,8 @@ export function useEscapeKey(enabled, onEscape) {
 
     function handleKeyDown(event) {
       if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
         onEscape()
       }
     }

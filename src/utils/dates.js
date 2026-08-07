@@ -40,3 +40,18 @@ export function normalizeDateValue(value) {
 
   return isValidDateKey(value) ? value : null
 }
+
+/** Add calendar days to a YYYY-MM-DD key. */
+export function addDaysToDateKey(dateKey, amount) {
+  const date = fromLocalDateKey(dateKey)
+  date.setDate(date.getDate() + amount)
+  return toLocalDateKey(date)
+}
+
+/** Signed day difference: `toDateKey` minus `fromDateKey`. */
+export function daysBetween(fromDateKey, toDateKey) {
+  const from = fromLocalDateKey(fromDateKey)
+  const to = fromLocalDateKey(toDateKey)
+  const msPerDay = 24 * 60 * 60 * 1000
+  return Math.round((to.getTime() - from.getTime()) / msPerDay)
+}

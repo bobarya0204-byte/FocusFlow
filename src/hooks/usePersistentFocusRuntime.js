@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getTodayLocalDate } from '../utils/dates'
 import {
+  buildVirtualOccurrence,
+  expandTasksForDate,
+  parseVirtualOccurrenceId,
+} from '../utils/virtualTasks'
+import {
   FOCUS_RUNTIME_KEY,
   applyTimerDuration,
   clearSelectedTaskIfMissing,
@@ -26,13 +31,21 @@ function findLinkedTask(tasks, taskId) {
     return null
   }
 
+  const parsed = parseVirtualOccurrenceId(taskId)
+  if (parsed) {
+    const master = tasks.find(
+      (task) => String(task.id) === String(parsed.masterId),
+    )
+    if (!master) {
+      return null
+    }
+    return buildVirtualOccurrence(master, parsed.dateKey)
+  }
+
   const today = getTodayLocalDate()
   return (
-    tasks.find(
-      (task) =>
-        !task.completed &&
-        task.plannedDate === today &&
-        String(task.id) === String(taskId),
+    expandTasksForDate(tasks, today).find(
+      (task) => String(task.id) === String(taskId),
     ) || null
   )
 }

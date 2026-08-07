@@ -1,7 +1,8 @@
 import { UNCATEGORIZED_PROJECT_ID } from './projects'
 import { getTodayLocalDate, normalizeDateValue } from './dates'
 import { normalizeDeletionFields } from './deletedItems'
-import { normalizeRecurrence } from './recurrence'
+import { normalizeRecurrence, migrateLegacyRecurringTasks } from './recurrence'
+import { normalizeRecurrenceState } from './recurrenceState'
 import { readJson } from './storage'
 
 const VALID_PRIORITIES = new Set(['High', 'Medium', 'Low'])
@@ -116,7 +117,7 @@ export function hasDuplicateTaskTitle(tasks, title, excludeTaskId = null) {
   })
 }
 
-function normalizeTasks(tasks) {
+function normalizeTasksOnly(tasks) {
   if (!Array.isArray(tasks)) {
     return []
   }
@@ -159,6 +160,7 @@ function normalizeTasks(tasks) {
       deleted: deletion.deleted,
       deletedAt: deletion.deletedAt,
       recurrence,
+      recurrenceState: normalizeRecurrenceState(task.recurrenceState),
       seriesId: task.seriesId ? String(task.seriesId) : null,
       occurrenceDate: normalizeDateValue(task.occurrenceDate),
     }
@@ -189,6 +191,7 @@ function normalizeTasks(tasks) {
           deleted: false,
           deletedAt: null,
           recurrence: null,
+          recurrenceState: normalizeRecurrenceState(null),
           seriesId: null,
           occurrenceDate: null,
         }
@@ -197,6 +200,33 @@ function normalizeTasks(tasks) {
 
     return [normalizedTask, ...migratedTasks]
   })
+}
+
+function finalizeNormalizedTasks(tasks) {
+  const normalized = normalizeTasksOnly(tasks)
+  return migrateLegacyRecurringTasks(
+    normalized.map((task) => {
+      const recurrence = normalizeRecurrence(task.recurrence)
+      const recurrenceState = normalizeRecurrenceState(task.recurrenceState)
+      const isRecurringMaster = Boolean(recurrence)
+
+      return {
+        ...task,
+        recurrence,
+        recurrenceState,
+        seriesId: isRecurringMaster ? null : task.seriesId,
+        occurrenceDate: isRecurringMaster ? null : task.occurrenceDate,
+        plannedDate: isRecurringMaster ? null : task.plannedDate,
+        completed: isRecurringMaster ? false : task.completed,
+        completedAt: isRecurringMaster ? null : task.completedAt,
+        status: isRecurringMaster ? 'Open' : task.status,
+      }
+    }),
+  )
+}
+
+function normalizeTasks(tasks) {
+  return finalizeNormalizedTasks(tasks)
 }
 
 export function reconcileTaskProjects(tasks, projects) {

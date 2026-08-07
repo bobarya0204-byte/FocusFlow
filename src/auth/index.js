@@ -16,4 +16,6 @@ export {
   initializeMsalSilently,
   isMsalEnabled,
 } from './msal/msalConfig.js'
+export { createUserFromMsalAccount } from './msal/mapMsalAccountToUser.js'
+export { authenticateBrowserMsal } from './msal/browserMsalAuth.js'
 export { useMsalAuth, MSAL_DISABLED_HELPERS } from './msal/useMsalAuth.js'

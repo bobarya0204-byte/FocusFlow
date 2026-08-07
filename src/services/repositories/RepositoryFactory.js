@@ -1,33 +1,41 @@
-import { AUTHENTICATION_MODES } from '../../auth/authTypes.js'
+import { appEnv } from '../../config/env.js'
 import { assertIDataRepository } from './IDataRepository.js'
+import { ApiRepository } from './ApiRepository.js'
 import { LocalStorageRepository } from './LocalStorageRepository.js'
 
 /**
  * @typedef {Object} RepositoryFactoryOptions
  * @property {import('../../auth/authTypes.js').FocusFlowUser} [user]
  * @property {string} [authenticationMode]
+ * @property {'api'|'local'} [repositoryMode]
  */
 
+export const REPOSITORY_MODES = {
+  API: 'api',
+  LOCAL: 'local',
+}
+
 const localStorageRepository = new LocalStorageRepository()
+const apiRepository = new ApiRepository()
 
 /**
  * Resolve the active data repository for the current identity context.
- * Step 1: always LocalStorageRepository regardless of mode.
+ * Default: ApiRepository (tasks via REST API, other keys via localStorage).
  *
  * @param {RepositoryFactoryOptions} [options]
  * @returns {import('./IDataRepository.js').IDataRepository}
  */
 export function createRepository(options = {}) {
-  const { authenticationMode = AUTHENTICATION_MODES.LOCAL } = options
   void options.user
+  void options.authenticationMode
 
-  switch (authenticationMode) {
-    case AUTHENTICATION_MODES.LOCAL:
-    case AUTHENTICATION_MODES.BROWSER_MSAL:
-    case AUTHENTICATION_MODES.TEAMS_SSO:
-    default:
-      return localStorageRepository
+  const mode = options.repositoryMode ?? appEnv.repositoryMode ?? REPOSITORY_MODES.API
+
+  if (mode === REPOSITORY_MODES.LOCAL) {
+    return localStorageRepository
   }
+
+  return apiRepository
 }
 
 /**

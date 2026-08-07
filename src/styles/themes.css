@@ -1,0 +1,155 @@
+/**
+ * FocusFlow design tokens — Fluent 2 inspired light default, preserved dark theme.
+ * Color tokens live on html so body, loader, and .app share one palette.
+ */
+
+html {
+  color-scheme: light;
+
+  /* Surfaces */
+  --ff-bg: #fafafa;
+  --ff-surface: #ffffff;
+  --ff-surface-hover: #f5f5f5;
+  --ff-surface-muted: rgba(0, 0, 0, 0.02);
+  --ff-surface-glass: rgba(255, 255, 255, 0.88);
+  --ff-border: #edebe9;
+  --ff-border-hover: #d2d0ce;
+
+  /* Text */
+  --ff-text: #242424;
+  --ff-muted: #616161;
+  --ff-on-primary: #ffffff;
+
+  /* Brand / accent */
+  --ff-accent: #0078d4;
+  --ff-accent-hover: #106ebe;
+  --ff-accent-soft: rgba(0, 120, 212, 0.08);
+  --ff-accent-soft-strong: rgba(0, 120, 212, 0.12);
+  --ff-on-accent: #ffffff;
+  --ff-accent-border: rgba(0, 120, 212, 0.28);
+  --ff-accent-fill-hover: rgba(0, 120, 212, 0.12);
+  --ff-accent-fill-strong: rgba(0, 120, 212, 0.16);
+  --ff-accent-subtle: rgba(0, 120, 212, 0.06);
+  --ff-accent-subtle-border: rgba(0, 120, 212, 0.2);
+  --ff-accent-subtle-border-strong: rgba(0, 120, 212, 0.32);
+  --ff-accent-subtle-border-hover: rgba(0, 120, 212, 0.45);
+  --ff-accent-subtle-border-active: rgba(0, 120, 212, 0.55);
+  --ff-focus-ring-shadow: rgba(0, 120, 212, 0.35);
+
+  /* Priority & status */
+  --ff-high: #c50f1f;
+  --ff-medium: #8a6116;
+  --ff-low: #107c10;
+  --ff-high-text: #a4262c;
+  --ff-medium-text: #8a6116;
+  --ff-low-text: #0e700e;
+  --ff-warning-text: #ca5010;
+  --ff-high-bg: rgba(197, 15, 31, 0.08);
+  --ff-high-border: rgba(197, 15, 31, 0.22);
+  --ff-medium-bg: rgba(138, 97, 22, 0.08);
+  --ff-medium-border: rgba(138, 97, 22, 0.2);
+  --ff-low-bg: rgba(16, 124, 16, 0.08);
+  --ff-low-border: rgba(16, 124, 16, 0.2);
+  --ff-warning-bg: rgba(202, 80, 16, 0.1);
+  --ff-danger-bg: rgba(197, 15, 31, 0.08);
+  --ff-danger-border: rgba(197, 15, 31, 0.24);
+  --ff-danger-border-strong: rgba(197, 15, 31, 0.42);
+
+  /* Overlays & fills */
+  --ff-overlay: rgba(0, 0, 0, 0.4);
+  --ff-overlay-strong: rgba(0, 0, 0, 0.55);
+  --ff-subtle-fill: rgba(0, 0, 0, 0.04);
+  --ff-subtle-fill-strong: rgba(0, 0, 0, 0.06);
+  --ff-inset-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+  --ff-tooltip-bg: rgba(36, 36, 36, 0.92);
+
+  /* Planner */
+  --ff-planner-hover: rgba(0, 120, 212, 0.05);
+  --ff-planner-hover-border: rgba(0, 120, 212, 0.2);
+  --ff-planner-hover-strong: rgba(0, 120, 212, 0.09);
+  --ff-planner-hover-border-strong: rgba(0, 120, 212, 0.35);
+  --ff-planner-active: rgba(0, 120, 212, 0.12);
+  --ff-planner-active-border: rgba(0, 120, 212, 0.42);
+  --ff-planner-badge-text: #242424;
+
+  /* Elevation */
+  --ff-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.06), 0 2px 8px rgba(0, 0, 0, 0.04);
+  --ff-shadow-menu: 0 4px 8px rgba(0, 0, 0, 0.08), 0 8px 24px rgba(0, 0, 0, 0.1);
+  --ff-shadow-modal: 0 8px 16px rgba(0, 0, 0, 0.1), 0 16px 32px rgba(0, 0, 0, 0.12);
+  --ff-shadow-drawer: -4px 0 24px rgba(0, 0, 0, 0.12);
+  --ff-shadow-sidebar: 1px 0 6px rgba(0, 0, 0, 0.04);
+
+  --ff-select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23616161' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+}
+
+html[data-theme='dark'] {
+  color-scheme: dark;
+
+  --ff-bg: #0f1117;
+  --ff-surface: #171a22;
+  --ff-surface-hover: #1d212b;
+  --ff-surface-muted: rgba(255, 255, 255, 0.04);
+  --ff-surface-glass: rgba(23, 26, 34, 0.65);
+  --ff-border: #2a2f3a;
+  --ff-border-hover: #3a4150;
+
+  --ff-text: #e8eaef;
+  --ff-muted: #8b93a7;
+  --ff-on-primary: #ffffff;
+
+  --ff-accent: #6b8afd;
+  --ff-accent-hover: #7d98fd;
+  --ff-accent-soft: rgba(107, 138, 253, 0.12);
+  --ff-accent-soft-strong: rgba(107, 138, 253, 0.16);
+  --ff-on-accent: #0f1117;
+  --ff-accent-border: rgba(107, 138, 253, 0.35);
+  --ff-accent-fill-hover: rgba(107, 138, 253, 0.2);
+  --ff-accent-fill-strong: rgba(107, 138, 253, 0.16);
+  --ff-accent-subtle: rgba(107, 138, 253, 0.05);
+  --ff-accent-subtle-border: rgba(107, 138, 253, 0.22);
+  --ff-accent-subtle-border-strong: rgba(107, 138, 253, 0.4);
+  --ff-accent-subtle-border-hover: rgba(107, 138, 253, 0.65);
+  --ff-accent-subtle-border-active: rgba(107, 138, 253, 0.72);
+  --ff-focus-ring-shadow: rgba(107, 138, 253, 0.45);
+
+  --ff-high: #e06c75;
+  --ff-medium: #d4a574;
+  --ff-low: #6dbf8c;
+  --ff-high-text: #6dbf8c;
+  --ff-medium-text: #d4a574;
+  --ff-low-text: #6dbf8c;
+  --ff-warning-text: #f0a06a;
+  --ff-high-bg: rgba(224, 108, 117, 0.12);
+  --ff-high-border: rgba(224, 108, 117, 0.25);
+  --ff-medium-bg: rgba(212, 165, 116, 0.12);
+  --ff-medium-border: rgba(212, 165, 116, 0.25);
+  --ff-low-bg: rgba(109, 191, 140, 0.12);
+  --ff-low-border: rgba(109, 191, 140, 0.25);
+  --ff-warning-bg: rgba(240, 160, 106, 0.16);
+  --ff-danger-bg: rgba(224, 108, 117, 0.12);
+  --ff-danger-border: rgba(232, 109, 122, 0.35);
+  --ff-danger-border-strong: rgba(232, 109, 122, 0.5);
+
+  --ff-overlay: rgba(0, 0, 0, 0.65);
+  --ff-overlay-strong: rgba(0, 0, 0, 0.55);
+  --ff-subtle-fill: rgba(255, 255, 255, 0.06);
+  --ff-subtle-fill-strong: rgba(255, 255, 255, 0.08);
+  --ff-inset-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+  --ff-tooltip-bg: rgba(42, 47, 58, 0.9);
+
+  --ff-planner-hover: rgba(107, 138, 253, 0.05);
+  --ff-planner-hover-border: rgba(107, 138, 253, 0.22);
+  --ff-planner-hover-strong: rgba(107, 138, 253, 0.09);
+  --ff-planner-hover-border-strong: rgba(107, 138, 253, 0.4);
+  --ff-planner-active: rgba(107, 138, 253, 0.12);
+  --ff-planner-active-border: rgba(107, 138, 253, 0.48);
+  --ff-planner-badge-text: #0f1117;
+
+  --ff-shadow-card: none;
+  --ff-shadow-menu: 0 12px 28px rgba(0, 0, 0, 0.35);
+  --ff-shadow-modal: 0 24px 48px rgba(0, 0, 0, 0.45);
+  --ff-shadow-drawer: -18px 0 42px rgba(0, 0, 0, 0.35);
+  --ff-shadow-sidebar: none;
+
+  --ff-select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%238b93a7' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+}
